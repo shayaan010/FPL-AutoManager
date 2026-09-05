@@ -49,11 +49,8 @@ It is not a chatbot or a read-only recommender. Approving a transfer sends a rea
 
 | Layer | Tech |
 |---|---|
-| Backend | FastAPI + PostgreSQL (asyncpg) |
+| Backend | FastAPI + PostgreSQL |
 | Cache & sessions | Redis |
-| Background jobs | APScheduler |
-| HTTP client | httpx |
-| Security | Argon2id password hashing, Fernet token encryption |
 | Frontend | React 18 + Vite + TanStack Query |
 | Realtime | WebSocket |
 | Deployment | Railway (backend) + Vercel (frontend) |
