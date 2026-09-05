@@ -28,7 +28,8 @@
 
 ## About The Project
 
-<!-- Add a screenshot here:  ![FPL Auto-Manager](docs/screenshot.png)  -->
+<img width="2556" height="1177" alt="image" src="https://github.com/user-attachments/assets/34ee3218-5611-4481-87ed-26da53cfbd71" />
+
 
 **FPL Auto-Manager** is a multi-user web app that connects to the official (undocumented) Fantasy Premier League API. It scores all ~700 players on form, fixture difficulty, ownership, price movement and rotation risk, then ranks a replacement for every player in your squad and explains its reasoning in plain English.
 
