@@ -28,7 +28,9 @@
 
 ## About The Project
 
-<!-- Add a screenshot here:  ![FPL Auto-Manager](docs/screenshot.png)  -->
+<img width="2531" height="1168" alt="image" src="https://github.com/user-attachments/assets/5fdf1f43-73ae-40c1-a6ad-44b1a587256e" />
+
+
 
 **FPL Auto-Manager** is a multi-user web app that connects to the official (undocumented) Fantasy Premier League API. It scores all ~700 players on form, fixture difficulty, ownership, price movement and rotation risk, then ranks a replacement for every player in your squad and explains its reasoning in plain English.
 
@@ -128,7 +130,6 @@ Weights are hand-tuned rather than fitted to data. A transfer's value is simply 
 
 The frontend deploys to **Vercel** from `frontend/`. The backend deploys to **Railway** from `backend/` with **Root Directory** set to `backend`, alongside Railway's Postgres and Redis plugins.
 
-Set `FRONTEND_ORIGIN` on the backend to the deployed frontend URL. Without it the session cookie stays `SameSite=Lax` and is dropped on cross-origin requests, so users appear signed out immediately after logging in.
 
 ---
 
