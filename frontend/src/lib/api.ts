@@ -1,14 +1,43 @@
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8010";
+export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8010";
+
+/** Carries the HTTP status so callers can tell "signed out" (401) from
+ *  "signed in but no FPL account linked" (428). */
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+function readableDetail(detail: unknown, status: number): string {
+  if (typeof detail === "string") return detail;
+  if (detail && typeof detail === "object") {
+    const d = detail as Record<string, unknown>;
+    if (typeof d.message === "string") return d.message;
+    // FastAPI validation errors arrive as a list of field problems.
+    if (Array.isArray(detail) && detail.length) {
+      const first = detail[0] as Record<string, unknown>;
+      if (typeof first?.msg === "string") return first.msg;
+    }
+    return JSON.stringify(detail);
+  }
+  return `Request failed: ${status}`;
+}
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
+    // Session lives in an httpOnly cookie, and the API is on a different
+    // origin in production, so cookies must be sent explicitly.
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     ...options,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail ? JSON.stringify(body.detail) : `Request failed: ${res.status}`);
+    throw new ApiError(readableDetail(body?.detail, res.status), res.status);
   }
+  if (res.status === 204) return undefined as T;
   return res.json();
 }
 
@@ -82,6 +111,15 @@ export interface GameweekInfo {
   free_transfers: number | null;
 }
 
+export interface User {
+  id: number;
+  email: string;
+}
+
+export interface AppConfig {
+  browser_login: boolean;
+}
+
 export interface AuthStatus {
   connected: boolean;
   team_id: number | null;
@@ -102,8 +140,19 @@ export const api = {
       body: JSON.stringify(body),
     }),
   getGameweek: () => request<GameweekInfo>("/gameweek"),
+  getConfig: () => request<AppConfig>("/config"),
+
+  // --- app account ---
+  register: (body: { email: string; password: string }) =>
+    request<User>("/account/register", { method: "POST", body: JSON.stringify(body) }),
+  signIn: (body: { email: string; password: string }) =>
+    request<User>("/account/login", { method: "POST", body: JSON.stringify(body) }),
+  signOut: () => request<{ status: string }>("/account/logout", { method: "POST" }),
+  getMe: () => request<User>("/account/me"),
+
+  // --- linked FPL account ---
   getAuthStatus: () => request<AuthStatus>("/auth/status"),
-  logout: () => request<{ status: string }>("/auth/logout", { method: "POST" }),
+  unlinkFpl: () => request<{ status: string }>("/auth/logout", { method: "POST" }),
   browserLoginStart: (fresh = false) =>
     request<{ status: string }>("/auth/browser/start", {
       method: "POST",

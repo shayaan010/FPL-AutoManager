@@ -9,6 +9,58 @@ function invalidateAfterConnect(queryClient) {
   queryClient.invalidateQueries({ queryKey: ["history"] });
 }
 
+/**
+ * The bookmarklet runs inside the fantasy.premierleague.com tab, where it is
+ * allowed to read that page's own localStorage. It hands the token back by
+ * navigating to us with it in the URL fragment -- a redirect rather than a
+ * fetch, so FPL's Content-Security-Policy can't block it.
+ */
+function bookmarkletSource() {
+  const target = `${window.location.origin}${window.location.pathname}`;
+  return `javascript:(function(){try{var k=Object.keys(localStorage).find(function(x){return x.indexOf('oidc.user:')===0});if(!k){alert('Sign in at fantasy.premierleague.com first, then click this again.');return}var t=JSON.parse(localStorage.getItem(k)).access_token;if(!t){alert('Signed in, but no FPL token found. Reload the page and try again.');return}location.href='${target}#fpl_token='+encodeURIComponent(t)}catch(e){alert('Could not read your FPL session: '+e.message)}})()`;
+}
+
+function BookmarkletPanel() {
+  const [copied, setCopied] = useState(false);
+  const href = bookmarkletSource();
+
+  return (
+    <div className="connect-option recommended">
+      <div className="connect-option-badge">Easiest</div>
+      <h3>Connect with one click</h3>
+      <ol className="setup-steps">
+        <li>
+          Drag this button to your bookmarks bar:{" "}
+          <a className="bookmarklet" href={href} onClick={(e) => e.preventDefault()}>
+            ⚽ Connect FPL
+          </a>
+        </li>
+        <li>
+          Go to{" "}
+          <a href="https://fantasy.premierleague.com/" target="_blank" rel="noreferrer">
+            fantasy.premierleague.com
+          </a>{" "}
+          and sign in as normal
+        </li>
+        <li>Click the bookmark — you'll come straight back here, connected</li>
+      </ol>
+      <button
+        type="button"
+        className="btn btn-dismiss"
+        style={{ marginTop: 10 }}
+        onClick={() => {
+          navigator.clipboard?.writeText(href).then(
+            () => { setCopied(true); setTimeout(() => setCopied(false), 2000); },
+            () => setCopied(false)
+          );
+        }}
+      >
+        {copied ? "Copied!" : "Can't drag? Copy the link"}
+      </button>
+    </div>
+  );
+}
+
 function ManualTokenFallback({ onConnected }) {
   const [open, setOpen] = useState(false);
   const [accessToken, setAccessToken] = useState("");
@@ -27,7 +79,7 @@ function ManualTokenFallback({ onConnected }) {
   if (!open) {
     return (
       <button type="button" className="fallback-toggle" onClick={() => setOpen(true)}>
-        Having trouble? Connect manually →
+        Advanced: paste a token manually →
       </button>
     );
   }
@@ -35,8 +87,8 @@ function ManualTokenFallback({ onConnected }) {
   return (
     <div className="fallback-panel">
       <div className="modal-subtitle" style={{ marginTop: 0 }}>
-        In a browser already signed into FPL, open DevTools → <strong>Console</strong>{" "}
-        and run this, then paste the result:
+        On fantasy.premierleague.com, open DevTools → <strong>Console</strong>, run
+        this, and paste the result:
         <pre className="snippet">
 {`JSON.parse(localStorage.getItem(
   Object.keys(localStorage)
@@ -46,11 +98,7 @@ function ManualTokenFallback({ onConnected }) {
       </div>
 
       <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          setError(null);
-          mutation.mutate();
-        }}
+        onSubmit={(e) => { e.preventDefault(); setError(null); mutation.mutate(); }}
       >
         <div className="form-field">
           <label htmlFor="access-token">Access token</label>
@@ -62,9 +110,7 @@ function ManualTokenFallback({ onConnected }) {
             onChange={(e) => setAccessToken(e.target.value)}
           />
         </div>
-
         {error && <div className="hit-warning">{error}</div>}
-
         <div className="modal-actions">
           <button type="submit" className="btn connect-btn" disabled={mutation.isPending}>
             {mutation.isPending ? "Connecting..." : "Connect"}
@@ -75,15 +121,15 @@ function ManualTokenFallback({ onConnected }) {
   );
 }
 
-function LoginModal({ onClose }) {
-  const [phase, setPhase] = useState("idle"); // idle | waiting
+function LocalBrowserLogin({ onConnected }) {
+  const [phase, setPhase] = useState("idle");
   const [error, setError] = useState(null);
   const pollRef = useRef(null);
   const queryClient = useQueryClient();
 
   useEffect(() => () => clearInterval(pollRef.current), []);
 
-  const start = async (fresh = false) => {
+  const start = async (fresh) => {
     setError(null);
     setPhase("waiting");
     try {
@@ -99,55 +145,70 @@ function LoginModal({ onClose }) {
         if (s.status === "success") {
           clearInterval(pollRef.current);
           invalidateAfterConnect(queryClient);
-          onClose();
+          onConnected();
         } else if (s.status === "error") {
           clearInterval(pollRef.current);
           setError(s.error || "Sign-in failed");
           setPhase("idle");
         }
       } catch {
-        // transient network hiccup while polling -- try again next tick
+        /* transient — retry next tick */
       }
     }, 1500);
   };
 
   return (
+    <div className="connect-option">
+      <h3>Open a browser here (local only)</h3>
+      <p className="modal-subtitle" style={{ marginTop: 4 }}>
+        Opens FPL in a Chrome window on this machine. Only works when the app
+        runs on your own computer.
+      </p>
+      {error && <div className="hit-warning">{error}</div>}
+      <div className="modal-actions" style={{ justifyContent: "flex-start" }}>
+        <button
+          type="button"
+          className="btn connect-btn"
+          disabled={phase === "waiting"}
+          onClick={() => start(false)}
+        >
+          {phase === "waiting" ? "Waiting for sign-in..." : "Open login window"}
+        </button>
+        <button
+          type="button"
+          className="btn btn-dismiss"
+          disabled={phase === "waiting"}
+          onClick={() => start(true)}
+        >
+          Different account
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ConnectModal({ onClose, allowBrowserLogin }) {
+  return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
         <h2>Connect your FPL account</h2>
         <div className="modal-subtitle">
-          {phase === "waiting"
-            ? "A Chrome window is open — sign in to FPL there and this will connect automatically."
-            : "Opens FPL in a Chrome window. Sign in however you normally do — including with Google. We never see your password, and your team is detected automatically."}
+          FPL has no "sign in with FPL" for other apps, so your browser hands us
+          a session token instead. We never see your FPL password, and you can
+          disconnect at any time.
         </div>
 
-        {error && <div className="hit-warning">{error}</div>}
-
-        <div className="modal-actions">
-          <button type="button" className="btn btn-dismiss" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn connect-btn"
-            disabled={phase === "waiting"}
-            onClick={() => start(false)}
-          >
-            {phase === "waiting" ? "Waiting for sign-in..." : "Sign in to FPL"}
-          </button>
-        </div>
-
-        <button
-          type="button"
-          className="fallback-toggle"
-          disabled={phase === "waiting"}
-          onClick={() => start(true)}
-        >
-          Sign in as a different account →
-        </button>
+        <BookmarkletPanel />
+        {allowBrowserLogin && <LocalBrowserLogin onConnected={onClose} />}
 
         <div className="fallback-divider" />
         <ManualTokenFallback onConnected={onClose} />
+
+        <div className="modal-actions">
+          <button type="button" className="btn btn-dismiss" onClick={onClose}>
+            Close
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -157,19 +218,12 @@ export default function ConnectAccount() {
   const [showModal, setShowModal] = useState(false);
   const queryClient = useQueryClient();
 
-  const statusQuery = useQuery({
-    queryKey: ["authStatus"],
-    queryFn: api.getAuthStatus,
-    refetchInterval: 3000,
-  });
+  const statusQuery = useQuery({ queryKey: ["authStatus"], queryFn: api.getAuthStatus });
+  const configQuery = useQuery({ queryKey: ["config"], queryFn: api.getConfig, staleTime: Infinity });
 
-  const logoutMutation = useMutation({
-    mutationFn: api.logout,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["authStatus"] });
-      queryClient.invalidateQueries({ queryKey: ["squad"] });
-      queryClient.invalidateQueries({ queryKey: ["recommendations"] });
-    },
+  const unlink = useMutation({
+    mutationFn: api.unlinkFpl,
+    onSuccess: () => invalidateAfterConnect(queryClient),
   });
 
   useEffect(() => {
@@ -183,8 +237,8 @@ export default function ConnectAccount() {
         Team {statusQuery.data.team_id}
         <button
           className="logout-link"
-          onClick={() => logoutMutation.mutate()}
-          disabled={logoutMutation.isPending}
+          onClick={() => unlink.mutate()}
+          disabled={unlink.isPending}
         >
           Disconnect
         </button>
@@ -195,9 +249,14 @@ export default function ConnectAccount() {
   return (
     <>
       <button className="btn connect-btn" onClick={() => setShowModal(true)}>
-        Sign in to FPL
+        Connect FPL
       </button>
-      {showModal && <LoginModal onClose={() => setShowModal(false)} />}
+      {showModal && (
+        <ConnectModal
+          onClose={() => setShowModal(false)}
+          allowBrowserLogin={Boolean(configQuery.data?.browser_login)}
+        />
+      )}
     </>
   );
 }

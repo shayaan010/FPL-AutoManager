@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { api } from "./lib/api";
+import { useEffect, useState } from "react";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { api, ApiError } from "./lib/api";
 import SquadView from "./components/SquadView";
 import TransferCard from "./components/TransferCard";
 import FixtureGrid from "./components/FixtureGrid";
@@ -10,6 +10,8 @@ import EmptyState from "./components/EmptyState";
 import PitchView from "./components/PitchView";
 import ManualTransfer from "./components/ManualTransfer";
 import ConnectAccount from "./components/ConnectAccount";
+import AuthScreen from "./components/AuthScreen";
+import AccountMenu from "./components/AccountMenu";
 
 function friendlyError(error) {
   if (!error) return null;
@@ -25,6 +27,47 @@ function friendlyError(error) {
 }
 
 export default function App() {
+  const queryClient = useQueryClient();
+
+  const meQuery = useQuery({
+    queryKey: ["me"],
+    queryFn: api.getMe,
+    retry: false,
+  });
+
+  // The bookmarklet returns here with the FPL token in the URL fragment.
+  // Consume it, then strip it from the address bar and history.
+  const [linking, setLinking] = useState(false);
+  useEffect(() => {
+    const match = window.location.hash.match(/fpl_token=([^&]+)/);
+    if (!match || !meQuery.data) return;
+    const token = decodeURIComponent(match[1]);
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    setLinking(true);
+    api
+      .loginWithToken({ access_token: token })
+      .then(() => queryClient.invalidateQueries())
+      .catch(() => {})
+      .finally(() => setLinking(false));
+  }, [meQuery.data, queryClient]);
+
+  if (meQuery.isLoading) {
+    return (
+      <div className="auth-screen">
+        <EmptyState icon="⏳" title="Loading..." />
+      </div>
+    );
+  }
+
+  if (meQuery.isError && meQuery.error instanceof ApiError && meQuery.error.status === 401) {
+    return <AuthScreen />;
+  }
+
+  return <Dashboard user={meQuery.data} linking={linking} />;
+}
+
+function Dashboard({ user, linking }) {
+  const queryClient = useQueryClient();
   const [recIndex, setRecIndex] = useState(0);
   const [squadView, setSquadView] = useState("pitch");
   const [transferMode, setTransferMode] = useState("suggested");
@@ -55,8 +98,10 @@ export default function App() {
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {linking && <span className="muted" style={{ fontSize: 13 }}>Linking FPL account...</span>}
           <ConnectAccount />
           <DeadlineCountdown />
+          <AccountMenu user={user} />
         </div>
       </div>
 
@@ -73,8 +118,8 @@ export default function App() {
             tone="error"
             title="Squad not connected"
             description={
-              friendlyError(squadQuery.error) === "FPL account not connected"
-                ? "Click \"Connect FPL Account\" in the top right to link your team."
+              squadQuery.error?.status === 428
+                ? "Click \"Connect FPL\" in the top right to link your team."
                 : friendlyError(squadQuery.error)
             }
           />
@@ -128,7 +173,7 @@ export default function App() {
                 title="No transfer recommendation right now"
                 description={
                   recommendationQuery.isError
-                    ? "This needs a connected squad first — sign in to FPL above."
+                    ? "This needs a connected FPL team first — use \"Connect FPL\" above."
                     : "Check back after the next player data refresh."
                 }
               />
