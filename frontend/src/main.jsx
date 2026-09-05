@@ -8,7 +8,10 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 60_000,
-      retry: 1,
+      // 401 (signed out) and 428 (no FPL account linked) are states, not
+      // failures -- retrying them just delays the UI that explains them.
+      retry: (failureCount, error) =>
+        error?.status === 401 || error?.status === 428 ? false : failureCount < 1,
     },
   },
 });

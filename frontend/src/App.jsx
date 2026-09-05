@@ -12,6 +12,8 @@ import ManualTransfer from "./components/ManualTransfer";
 import ConnectAccount from "./components/ConnectAccount";
 import AuthScreen from "./components/AuthScreen";
 import AccountMenu from "./components/AccountMenu";
+import Icon from "./components/Icon";
+import ThemeToggle from "./components/ThemeToggle";
 
 function friendlyError(error) {
   if (!error) return null;
@@ -54,7 +56,7 @@ export default function App() {
   if (meQuery.isLoading) {
     return (
       <div className="auth-screen">
-        <EmptyState icon="⏳" title="Loading..." />
+        <EmptyState icon="clock" title="Loading..." />
       </div>
     );
   }
@@ -91,30 +93,31 @@ function Dashboard({ user, linking }) {
     <div className="app-shell">
       <div className="topbar">
         <div className="brand">
-          <div className="brand-mark">⚽</div>
+          <div className="brand-mark"><Icon name="ball" size={18} /></div>
           <div className="brand-text">
             <h1>FPL Auto-Manager</h1>
             <div className="subtitle">Gameweek {gameweek ?? "—"}</div>
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {linking && <span className="muted" style={{ fontSize: 13 }}>Linking FPL account...</span>}
+        <div className="topbar-right">
+          {linking && <span className="linking-note">Linking FPL account...</span>}
           <ConnectAccount />
           <DeadlineCountdown />
+          <ThemeToggle />
           <AccountMenu user={user} />
         </div>
       </div>
 
       <div className="sidebar">
         <div className="section-heading">
-          <h3>Your Squad</h3>
+          <h3><Icon name="squad" size={14} />Your Squad</h3>
         </div>
         {squadQuery.isLoading && (
-          <EmptyState icon="⏳" title="Loading squad..." />
+          <EmptyState icon="clock" title="Loading squad..." />
         )}
         {squadQuery.isError && (
           <EmptyState
-            icon="🔌"
+            icon="unlink"
             tone="error"
             title="Squad not connected"
             description={
@@ -137,7 +140,7 @@ function Dashboard({ user, linking }) {
       <div className="main-panel">
         <div>
           <div className="section-heading">
-            <h3>{transferMode === "suggested" ? "Recommended Transfer" : "Build a Transfer"}</h3>
+            <h3><Icon name="swap" size={14} />{transferMode === "suggested" ? "Recommended transfer" : "Build a transfer"}</h3>
             <div className="view-toggle">
               <button
                 className={`toggle-btn ${transferMode === "suggested" ? "active" : ""}`}
@@ -169,7 +172,7 @@ function Dashboard({ user, linking }) {
           {transferMode === "suggested" && !currentRec && (
             <div className="card">
               <EmptyState
-                icon="✅"
+                icon="check"
                 title="No transfer recommendation right now"
                 description={
                   recommendationQuery.isError
@@ -183,7 +186,7 @@ function Dashboard({ user, linking }) {
 
         <div>
           <div className="section-heading">
-            <h3>{squadView === "pitch" ? "Your Team" : "Fixture Difficulty"}</h3>
+            <h3><Icon name={squadView === "pitch" ? "pitch" : "list"} size={14} />{squadView === "pitch" ? "Your team" : "Fixture difficulty"}</h3>
             <div className="view-toggle">
               <button
                 className={`toggle-btn ${squadView === "pitch" ? "active" : ""}`}
@@ -207,7 +210,7 @@ function Dashboard({ user, linking }) {
             ) : (
               <div className="card">
                 <EmptyState
-                  icon="🏟️"
+                  icon="pitch"
                   title="No team to show yet"
                   description="Your line-up appears here once your squad is loaded."
                 />
@@ -221,7 +224,7 @@ function Dashboard({ user, linking }) {
 
       <div className="history-panel">
         <div className="section-heading">
-          <h3>Transfer History</h3>
+          <h3><Icon name="history" size={14} />Transfer history</h3>
         </div>
         <div className="card">
           <TransferHistory transfers={history} />

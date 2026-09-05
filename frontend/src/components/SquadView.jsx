@@ -23,21 +23,24 @@ export default function SquadView({ squad = [], bank, teamValue, freeTransfers }
       </div>
 
       {squad.length === 0 ? (
-        <EmptyState icon="👥" title="Squad is empty" description="Nothing to show yet." />
+        <EmptyState icon="squad" title="Squad is empty" description="Nothing to show yet." />
       ) : (
         squad.map((p) => (
           <div className="squad-row" key={p.id}>
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="squad-row-main">
               <div className="player-name">
                 <span className="pos-pill">{POSITION_NAMES[p.element_type]}</span>
                 {p.web_name}
                 {p.is_captain && <span className="captain-badge">C</span>}
               </div>
-              <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+              <div className="squad-row-meta">
                 £{(p.now_cost / 10).toFixed(1)}m · form {p.form}
               </div>
               <div className="score-bar-track">
-                <div className="score-bar-fill" style={{ width: `${Math.max(0, (p.score / maxScore) * 100)}%` }} />
+                <div
+                  className="score-bar-fill"
+                  style={{ width: `${Math.max(0, (p.score / maxScore) * 100)}%` }}
+                />
               </div>
             </div>
             <div className="score-value">{p.score.toFixed(1)}</div>

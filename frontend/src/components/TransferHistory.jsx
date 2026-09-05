@@ -4,7 +4,7 @@ export default function TransferHistory({ transfers = [] }) {
   if (transfers.length === 0) {
     return (
       <EmptyState
-        icon="📋"
+        icon="history"
         title="No transfers yet"
         description="Approved transfers will show up here with the points they gained after each gameweek completes."
       />

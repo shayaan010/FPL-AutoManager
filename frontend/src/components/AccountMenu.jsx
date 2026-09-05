@@ -1,5 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { api } from "../lib/api";
+import Icon from "./Icon";
 
 export default function AccountMenu({ user }) {
   const signOut = useMutation({
@@ -19,6 +20,7 @@ export default function AccountMenu({ user }) {
         onClick={() => signOut.mutate()}
         disabled={signOut.isPending}
       >
+        <Icon name="logout" size={13} />
         Sign out
       </button>
     </div>

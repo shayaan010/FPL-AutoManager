@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
+import Icon from "./Icon";
+import ThemeToggle from "./ThemeToggle";
 
 export default function AuthScreen() {
   const [mode, setMode] = useState("signin"); // signin | register
@@ -31,27 +33,26 @@ export default function AuthScreen() {
 
   return (
     <div className="auth-screen">
+      <div className="auth-screen-toolbar">
+        <ThemeToggle />
+      </div>
       <div className="auth-card">
-        <div className="brand" style={{ justifyContent: "center", marginBottom: 18 }}>
-          <div className="brand-mark">⚽</div>
-          <div className="brand-text">
-            <h1 style={{ fontSize: 18 }}>FPL Auto-Manager</h1>
-            <div className="subtitle">Smarter transfers, every gameweek</div>
-          </div>
+        <div className="auth-brand">
+          <div className="brand-mark"><Icon name="ball" size={20} /></div>
+          <h1>FPL Auto-Manager</h1>
+          <p>Smarter transfers, every gameweek</p>
         </div>
 
-        <div className="view-toggle" style={{ marginBottom: 18 }}>
+        <div className="view-toggle auth-toggle">
           <button
             className={`toggle-btn ${!registering ? "active" : ""}`}
             onClick={() => { setMode("signin"); setError(null); }}
-            style={{ flex: 1 }}
           >
             Sign in
           </button>
           <button
             className={`toggle-btn ${registering ? "active" : ""}`}
             onClick={() => { setMode("register"); setError(null); }}
-            style={{ flex: 1 }}
           >
             Create account
           </button>
@@ -87,8 +88,7 @@ export default function AuthScreen() {
 
           <button
             type="submit"
-            className="btn connect-btn"
-            style={{ width: "100%", marginTop: 8 }}
+            className="btn connect-btn btn-block"
             disabled={mutation.isPending}
           >
             {mutation.isPending

@@ -52,11 +52,13 @@ export default function DeadlineCountdown() {
   return (
     <div className={`countdown-pill ${urgent ? "urgent" : ""}`}>
       <span className={`status-dot ${connected ? "" : "off"}`} />
-      {minutesLeft === null
-        ? connected
-          ? "Waiting for deadline data..."
-          : "Connecting..."
-        : `Next deadline: ${formatMinutes(minutesLeft)}`}
+      {minutesLeft === null ? (
+        <span className="muted">{connected ? "Awaiting deadline" : "Connecting..."}</span>
+      ) : (
+        <>
+          Deadline <strong>{formatMinutes(minutesLeft)}</strong>
+        </>
+      )}
     </div>
   );
 }

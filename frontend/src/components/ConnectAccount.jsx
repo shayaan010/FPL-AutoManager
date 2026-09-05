@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
+import Icon from "./Icon";
 
 function invalidateAfterConnect(queryClient) {
   queryClient.invalidateQueries({ queryKey: ["authStatus"] });
@@ -32,7 +33,7 @@ function BookmarkletPanel() {
         <li>
           Drag this button to your bookmarks bar:{" "}
           <a className="bookmarklet" href={href} onClick={(e) => e.preventDefault()}>
-            ⚽ Connect FPL
+            <Icon name="link" size={13} /> Connect FPL
           </a>
         </li>
         <li>
@@ -46,8 +47,7 @@ function BookmarkletPanel() {
       </ol>
       <button
         type="button"
-        className="btn btn-dismiss"
-        style={{ marginTop: 10 }}
+        className="btn btn-dismiss btn-sm copy-link-btn"
         onClick={() => {
           navigator.clipboard?.writeText(href).then(
             () => { setCopied(true); setTimeout(() => setCopied(false), 2000); },
@@ -86,7 +86,7 @@ function ManualTokenFallback({ onConnected }) {
 
   return (
     <div className="fallback-panel">
-      <div className="modal-subtitle" style={{ marginTop: 0 }}>
+      <div className="modal-subtitle flush">
         On fantasy.premierleague.com, open DevTools → <strong>Console</strong>, run
         this, and paste the result:
         <pre className="snippet">
@@ -160,12 +160,12 @@ function LocalBrowserLogin({ onConnected }) {
   return (
     <div className="connect-option">
       <h3>Open a browser here (local only)</h3>
-      <p className="modal-subtitle" style={{ marginTop: 4 }}>
+      <p className="modal-subtitle tight">
         Opens FPL in a Chrome window on this machine. Only works when the app
         runs on your own computer.
       </p>
       {error && <div className="hit-warning">{error}</div>}
-      <div className="modal-actions" style={{ justifyContent: "flex-start" }}>
+      <div className="modal-actions start">
         <button
           type="button"
           className="btn connect-btn"
@@ -234,7 +234,7 @@ export default function ConnectAccount() {
     return (
       <div className="connected-pill">
         <span className="status-dot" />
-        Team {statusQuery.data.team_id}
+        Team <strong className="tabular">{statusQuery.data.team_id}</strong>
         <button
           className="logout-link"
           onClick={() => unlink.mutate()}
@@ -249,6 +249,7 @@ export default function ConnectAccount() {
   return (
     <>
       <button className="btn connect-btn" onClick={() => setShowModal(true)}>
+        <Icon name="link" size={13} />
         Connect FPL
       </button>
       {showModal && (

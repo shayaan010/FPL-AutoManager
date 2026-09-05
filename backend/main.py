@@ -8,6 +8,7 @@ import sys
 from contextlib import asynccontextmanager
 from typing import Optional
 
+import httpx
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -363,8 +364,13 @@ async def get_squad(ctx: tuple = Depends(current_fpl)):
     _, client, team_id = ctx
     try:
         my_team = await client.get_my_team(team_id)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Failed to fetch squad from FPL: {e}")
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code in (401, 403):
+            raise HTTPException(status_code=428, detail="Your FPL session expired — reconnect your account")
+        raise HTTPException(status_code=502, detail="FPL is not responding right now. Try again shortly.")
+    except Exception:
+        logger.exception("Failed to fetch squad for team %s", team_id)
+        raise HTTPException(status_code=502, detail="FPL is not responding right now. Try again shortly.")
 
     _, _, scored_players = await _get_scored_players(client)
     by_id = {p.id: p for p in scored_players}
@@ -396,8 +402,13 @@ async def get_recommendations(ctx: tuple = Depends(current_fpl)):
     _, client, team_id = ctx
     try:
         my_team = await client.get_my_team(team_id)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Failed to fetch squad from FPL: {e}")
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code in (401, 403):
+            raise HTTPException(status_code=428, detail="Your FPL session expired — reconnect your account")
+        raise HTTPException(status_code=502, detail="FPL is not responding right now. Try again shortly.")
+    except Exception:
+        logger.exception("Failed to fetch squad for team %s", team_id)
+        raise HTTPException(status_code=502, detail="FPL is not responding right now. Try again shortly.")
 
     _, _, scored_players = await _get_scored_players(client)
 

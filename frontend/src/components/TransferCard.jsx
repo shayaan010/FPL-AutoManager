@@ -40,16 +40,16 @@ function readableError(message) {
 function PlayerColumn({ player, side }) {
   return (
     <div className={`player-col ${side}`}>
-      <div className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+      <div className="player-col-label">
         {side === "out" ? "Transfer out" : "Transfer in"}
       </div>
-      <div className="name" style={{ marginTop: 6 }}>{player.web_name}</div>
-      <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>
+      <div className="name">{player.web_name}</div>
+      <div className="player-col-meta">
         <span className="pos-pill">{POSITION_NAMES[player.element_type]}</span>
         £{(player.now_cost / 10).toFixed(1)}m
       </div>
-      <div className="muted" style={{ fontSize: 13 }}>Form {player.form}</div>
-      <div style={{ marginTop: 10 }}>
+      <div className="player-col-meta">Form {player.form}</div>
+      <div className="player-col-fixtures">
         <FixtureSquares fixtures={player.fixtures} count={3} />
       </div>
       <div className="score-pill">{player.score.toFixed(1)}</div>
@@ -137,7 +137,7 @@ export default function TransferCard({ recommendation, gameweek, index = 0, tota
         </div>
       )}
 
-      {error && <div className="hit-warning" style={{ marginTop: 12 }}>{error}</div>}
+      {error && <div className="hit-warning spaced">{error}</div>}
 
       <div className="actions-row">
         <button

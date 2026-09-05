@@ -2,10 +2,11 @@ import EmptyState from "./EmptyState";
 
 const POSITION_NAMES = { 1: "GKP", 2: "DEF", 3: "MID", 4: "FWD" };
 
-function difficultyColor(difficulty) {
-  if (difficulty <= 2) return "var(--green)";
-  if (difficulty === 3) return "var(--yellow)";
-  return "var(--red)";
+// FDR 1-2 is a kind fixture, 3 is neutral, 4-5 is hard.
+function difficultyClass(difficulty) {
+  if (difficulty <= 2) return "good";
+  if (difficulty === 3) return "mid";
+  return "bad";
 }
 
 export function FixtureSquares({ fixtures = [], count = 5 }) {
@@ -16,8 +17,7 @@ export function FixtureSquares({ fixtures = [], count = 5 }) {
       {shown.map((f, i) => (
         <span
           key={i}
-          className="fixture-square"
-          style={{ backgroundColor: difficultyColor(f.difficulty) }}
+          className={`fixture-square ${difficultyClass(f.difficulty)}`}
           title={`GW${f.event} vs ${f.opponent_short_name} (${f.is_home ? "H" : "A"}), FDR ${f.difficulty}`}
         />
       ))}
@@ -30,7 +30,7 @@ export default function FixtureGrid({ squad = [] }) {
     return (
       <div className="card">
         <EmptyState
-          icon="📅"
+          icon="list"
           title="No fixtures to show yet"
           description="Fixture difficulty appears here once your squad is loaded."
         />
@@ -51,7 +51,7 @@ export default function FixtureGrid({ squad = [] }) {
         <tbody>
           {squad.map((p) => (
             <tr key={p.id}>
-              <td style={{ fontWeight: 600 }}>{p.web_name}</td>
+              <td className="player-cell">{p.web_name}</td>
               <td>
                 <span className="pos-pill">{POSITION_NAMES[p.element_type]}</span>
               </td>

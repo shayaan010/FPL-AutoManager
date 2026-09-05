@@ -45,7 +45,7 @@ function PlayerSearch({ position, onPick, picked, onClear }) {
       <div className="picked-player">
         <div>
           <strong>{picked.web_name}</strong>
-          <div className="muted" style={{ fontSize: 12 }}>
+          <div className="picked-player-meta">
             {picked.team_short_name} · {POSITION_NAMES[picked.element_type]} · £
             {(picked.now_cost / 10).toFixed(1)}m
           </div>
@@ -224,7 +224,7 @@ export default function ManualTransfer({ squad = [], gameweek }) {
         </>
       )}
 
-      {error && <div className="hit-warning" style={{ marginTop: 12 }}>{error}</div>}
+      {error && <div className="hit-warning spaced">{error}</div>}
       {done && <div className="success-banner">{done}</div>}
 
       <div className="actions-row">
