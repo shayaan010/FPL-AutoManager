@@ -6,9 +6,10 @@ import logging
 import os
 import sys
 from contextlib import asynccontextmanager
+from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -23,17 +24,21 @@ load_dotenv()
 
 import cache
 import db
-from browser_login import clear_profile, login_via_browser
+import fpl_client as fpl
+import security
 from fpl_client import FPLAuthError, FPLClient, FPLTransferError
 from models import (
     AuthStatus,
     BrowserLoginStartRequest,
     BrowserLoginState,
     GameweekInfo,
+    LoginRequest,
+    RegisterRequest,
     TokenLoginRequest,
     TransferExecuteRequest,
     TransferPayload,
     TransferPreviewRequest,
+    UserOut,
 )
 from optimizer import POSITION_NAMES, build_reasons, build_scored_players, recommend_transfers
 from scheduler import scheduler, start_scheduler
@@ -41,8 +46,10 @@ from scheduler import scheduler, start_scheduler
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("main")
 
-fpl_client = FPLClient()
-browser_login_state: dict = {"status": "idle", "error": None}
+# Server-side browser sign-in only works when a person is sitting at the
+# machine running the backend, so it's a local-dev convenience and is off by
+# default in a deployed environment.
+ENABLE_BROWSER_LOGIN = os.environ.get("ENABLE_BROWSER_LOGIN", "").lower() in ("1", "true", "yes")
 
 
 class WSManager:
@@ -74,20 +81,17 @@ ws_manager = WSManager()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.init_db()
-    if await fpl_client.restore_session():
-        logger.info("Restored FPL session from a previous login")
-    else:
-        logger.info("No active FPL session -- waiting for a user to connect via POST /auth/browser/start")
-    start_scheduler(fpl_client, ws_manager)
+    start_scheduler(FPLClient(), ws_manager)
     yield
     scheduler.shutdown(wait=False)
-    await fpl_client.aclose()
+    await fpl.aclose()
     await db.close_db()
 
 
 app = FastAPI(title="FPL Auto-Manager", lifespan=lifespan)
 
 FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "http://localhost:5173")
+IS_PRODUCTION = os.environ.get("ENVIRONMENT", "").lower() == "production" or FRONTEND_ORIGIN.startswith("https://")
 
 app.add_middleware(
     CORSMiddleware,
@@ -113,52 +117,156 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     )
 
 
-async def _require_connection() -> int:
-    team_id = await cache.get_team_id()
-    if not team_id or not fpl_client.is_logged_in():
-        raise HTTPException(status_code=401, detail="FPL account not connected")
-    return team_id
+# ------------------------------------------------------------ accounts --- #
 
 
-async def _get_scored_players():
-    bootstrap = await fpl_client.get_bootstrap()
-    fixtures = await fpl_client.get_fixtures()
-    return bootstrap, fixtures, build_scored_players(bootstrap, fixtures)
+async def current_user(request: Request) -> dict:
+    """The signed-in app user, or 401."""
+    session_id = request.cookies.get(security.SESSION_COOKIE)
+    if not session_id:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    user_id = await cache.get_session_user_id(session_id)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Session expired -- sign in again")
+    user = await db.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    return user
 
 
-async def _verify_and_store_team(team_id: int) -> None:
-    try:
-        await fpl_client.get_my_team(team_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="That team ID couldn't be found on your FPL account")
-    await cache.set_team_id(team_id)
+async def current_fpl(user: dict = Depends(current_user)) -> tuple[dict, FPLClient, int]:
+    """The user's linked FPL session, or 428 if they haven't connected one."""
+    conn = await db.get_fpl_connection(user["id"])
+    if not conn:
+        raise HTTPException(status_code=428, detail="FPL account not connected")
+
+    token = security.decrypt(conn["token_encrypted"])
+    if not token:
+        raise HTTPException(status_code=428, detail="Stored FPL session is unreadable -- reconnect")
+
+    team_id = conn.get("team_id")
+    if not team_id:
+        raise HTTPException(status_code=428, detail="FPL account not connected")
+    return user, FPLClient(token), team_id
 
 
-@app.post("/auth/logout")
-async def logout():
-    global browser_login_state
-    await fpl_client.logout()
-    await cache.clear_session()
-    # Also sign the browser profile out, otherwise the next sign-in silently
-    # reconnects to the same FPL account and you can't switch.
-    clear_profile()
-    browser_login_state = {"status": "idle", "error": None}
+def _set_session_cookie(response: Response, session_id: str) -> None:
+    response.set_cookie(
+        security.SESSION_COOKIE,
+        session_id,
+        max_age=security.SESSION_TTL_SECONDS,
+        httponly=True,
+        # Frontend and API sit on different domains in production, so the
+        # cookie has to be SameSite=None -- which browsers only accept when
+        # it is also Secure.
+        samesite="none" if IS_PRODUCTION else "lax",
+        secure=IS_PRODUCTION,
+        path="/",
+    )
+
+
+@app.post("/account/register")
+async def register(req: RegisterRequest, response: Response) -> UserOut:
+    email = req.email.lower().strip()
+    user = await db.create_user(email, security.hash_password(req.password))
+    if not user:
+        raise HTTPException(status_code=409, detail="That email is already registered")
+
+    session_id = security.new_session_id()
+    await cache.create_session(session_id, user["id"])
+    _set_session_cookie(response, session_id)
+    return UserOut(**user)
+
+
+@app.post("/account/login")
+async def login(req: LoginRequest, response: Response) -> UserOut:
+    email = req.email.lower().strip()
+    user = await db.get_user_by_email(email)
+    if not user or not security.verify_password(req.password, user["password_hash"]):
+        # Same message either way so the endpoint can't be used to discover
+        # which emails are registered.
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+
+    if security.needs_rehash(user["password_hash"]):
+        await db.update_password_hash(user["id"], security.hash_password(req.password))
+
+    session_id = security.new_session_id()
+    await cache.create_session(session_id, user["id"])
+    _set_session_cookie(response, session_id)
+    return UserOut(id=user["id"], email=user["email"])
+
+
+@app.post("/account/logout")
+async def account_logout(request: Request, response: Response):
+    session_id = request.cookies.get(security.SESSION_COOKIE)
+    if session_id:
+        await cache.delete_session(session_id)
+    response.delete_cookie(security.SESSION_COOKIE, path="/")
     return {"status": "ok"}
 
 
-async def _run_browser_login(fresh: bool = False):
+@app.get("/account/me")
+async def me(user: dict = Depends(current_user)) -> UserOut:
+    return UserOut(**user)
+
+
+# --------------------------------------------------- fpl account link --- #
+
+
+@app.get("/auth/status")
+async def auth_status(user: dict = Depends(current_user)) -> AuthStatus:
+    conn = await db.get_fpl_connection(user["id"])
+    if not conn or not conn.get("team_id"):
+        return AuthStatus(connected=False)
+    return AuthStatus(connected=True, team_id=conn["team_id"])
+
+
+@app.post("/auth/token")
+async def link_fpl_account(req: TokenLoginRequest, user: dict = Depends(current_user)):
+    """Link an FPL access token the user captured in their own browser."""
+    client = FPLClient(req.access_token)
+    try:
+        player = await client.verify()
+    except FPLAuthError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+    team_id = req.team_id or player.get("entry")
+    if not team_id:
+        raise HTTPException(status_code=400, detail="Couldn't determine your team ID from that session")
+
+    await db.save_fpl_connection(user["id"], int(team_id), security.encrypt(req.access_token))
+    return {"status": "ok", "team_id": int(team_id)}
+
+
+@app.post("/auth/logout")
+async def unlink_fpl_account(user: dict = Depends(current_user)):
+    await db.delete_fpl_connection(user["id"])
+    return {"status": "ok"}
+
+
+# Local-only convenience: opens a real browser on the machine running the
+# backend. Useless when deployed (there's no desktop, and the user is
+# elsewhere), so it stays behind ENABLE_BROWSER_LOGIN.
+browser_login_state: dict = {"status": "idle", "error": None}
+
+
+async def _run_browser_login(user_id: int, fresh: bool):
     global browser_login_state
     try:
-        bundle = await login_via_browser(fresh=fresh)
-        await fpl_client.load_token(bundle)
+        from browser_login import login_via_browser
 
-        # The session already tells us which team is theirs -- no need to make
-        # the user go find their team id.
-        team_id = await fpl_client.get_my_entry_id()
+        bundle = await login_via_browser(fresh=fresh)
+        access_token = (bundle or {}).get("access_token")
+        if not access_token:
+            raise RuntimeError("No access token found in that sign-in")
+
+        client = FPLClient(access_token)
+        player = await client.verify()
+        team_id = player.get("entry")
         if not team_id:
             raise RuntimeError("Signed in, but couldn't determine your team ID")
-        await cache.set_team_id(team_id)
 
+        await db.save_fpl_connection(user_id, int(team_id), security.encrypt(access_token))
         browser_login_state = {"status": "success", "error": None}
     except Exception as e:
         logger.exception("Browser sign-in failed")
@@ -166,117 +274,40 @@ async def _run_browser_login(fresh: bool = False):
 
 
 @app.post("/auth/browser/start")
-async def start_browser_login(req: BrowserLoginStartRequest | None = None):
+async def start_browser_login(req: BrowserLoginStartRequest | None = None,
+                              user: dict = Depends(current_user)):
     global browser_login_state
+    if not ENABLE_BROWSER_LOGIN:
+        raise HTTPException(
+            status_code=501,
+            detail="Browser sign-in only works when running locally. Use the bookmarklet instead.",
+        )
     if browser_login_state.get("status") == "waiting":
         raise HTTPException(status_code=409, detail="A sign-in is already in progress")
     browser_login_state = {"status": "waiting", "error": None}
-    asyncio.create_task(_run_browser_login(fresh=bool(req and req.fresh)))
+    asyncio.create_task(_run_browser_login(user["id"], bool(req and req.fresh)))
     return browser_login_state
 
 
 @app.get("/auth/browser/status")
-async def browser_login_status() -> BrowserLoginState:
+async def browser_login_status(user: dict = Depends(current_user)) -> BrowserLoginState:
     return BrowserLoginState(**browser_login_state)
 
 
-@app.post("/auth/token")
-async def login_with_token(req: TokenLoginRequest):
-    """
-    Adopt an FPL access token captured outside this app -- a manual fallback
-    if the browser sign-in can't run. The team id is derived from the token's
-    own session when not given.
-    """
-    try:
-        await fpl_client.load_token({"access_token": req.access_token})
-    except FPLAuthError as e:
-        raise HTTPException(status_code=401, detail=str(e))
-
-    team_id = req.team_id or await fpl_client.get_my_entry_id()
-    if not team_id:
-        raise HTTPException(status_code=400, detail="Couldn't determine your team ID from that session")
-
-    await _verify_and_store_team(team_id)
-    return {"status": "ok", "team_id": team_id}
+@app.get("/config")
+async def config():
+    """Lets the frontend show only the connect methods this deployment supports."""
+    return {"browser_login": ENABLE_BROWSER_LOGIN}
 
 
-@app.get("/auth/status")
-async def auth_status() -> AuthStatus:
-    team_id = await cache.get_team_id()
-    if not fpl_client.is_logged_in() and team_id is not None:
-        await fpl_client.restore_session()
-    connected = bool(team_id) and fpl_client.is_logged_in()
-    return AuthStatus(connected=connected, team_id=team_id if connected else None)
+# ------------------------------------------------------------- shared --- #
 
 
-@app.get("/squad")
-async def get_squad():
-    team_id = await _require_connection()
-    try:
-        my_team = await fpl_client.get_my_team(team_id)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Failed to fetch squad from FPL: {e}")
-
-    _, _, scored_players = await _get_scored_players()
-    by_id = {p.id: p for p in scored_players}
-
-    picks = my_team.get("picks", [])
-    squad = []
-    for pick in picks:
-        player = by_id.get(pick["element"])
-        if player:
-            squad.append({
-                **player.model_dump(),
-                "position": pick.get("position"),
-                "is_captain": pick.get("is_captain"),
-                "is_vice_captain": pick.get("is_vice_captain"),
-                "multiplier": pick.get("multiplier"),
-            })
-    squad.sort(key=lambda p: p.get("position") or 99)
-
-    transfers_info = my_team.get("transfers", {})
-    return {
-        "squad": squad,
-        "bank": transfers_info.get("bank"),
-        "team_value": transfers_info.get("value"),
-        "free_transfers": transfers_info.get("limit"),
-    }
-
-
-@app.get("/recommendations")
-async def get_recommendations():
-    team_id = await _require_connection()
-    try:
-        my_team = await fpl_client.get_my_team(team_id)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Failed to fetch squad from FPL: {e}")
-
-    _, _, scored_players = await _get_scored_players()
-
-    squad_ids = [pick["element"] for pick in my_team.get("picks", [])]
-    transfers_info = my_team.get("transfers", {})
-    bank = transfers_info.get("bank", 0)
-    free_transfers = transfers_info.get("limit") or 1
-
-    recs = recommend_transfers(squad_ids, bank, scored_players, free_transfers)
-    if not recs:
-        raise HTTPException(status_code=404, detail="No viable transfer found")
-    return recs
-
-
-@app.get("/players/search")
-async def search_players(q: str = "", element_type: int | None = None, limit: int = 25):
-    """Name search over all players, for building a transfer by hand."""
-    _, _, scored_players = await _get_scored_players()
-
-    needle = q.strip().lower()
-    matches = [
-        p for p in scored_players
-        if (element_type is None or p.element_type == element_type)
-        and (not needle or needle in p.web_name.lower() or needle in p.team_short_name.lower())
-    ]
-    matches.sort(key=lambda p: p.score, reverse=True)
-    return matches[:limit]
+async def _get_scored_players(client: Optional[FPLClient] = None):
+    client = client or FPLClient()
+    bootstrap = await client.get_bootstrap()
+    fixtures = await client.get_fixtures()
+    return bootstrap, fixtures, build_scored_players(bootstrap, fixtures)
 
 
 async def _validate_transfer(my_team: dict, scored_players: list, element_out: int, element_in: int):
@@ -324,12 +355,85 @@ async def _validate_transfer(my_team: dict, scored_players: list, element_out: i
     return out_pick, player_out, player_in, selling_price
 
 
-@app.post("/transfer/preview")
-async def preview_transfer(req: TransferPreviewRequest):
-    """Validate a hand-built transfer and show its effect, without executing."""
-    team_id = await _require_connection()
-    my_team = await fpl_client.get_my_team(team_id)
+# -------------------------------------------------------------- squad --- #
+
+
+@app.get("/squad")
+async def get_squad(ctx: tuple = Depends(current_fpl)):
+    _, client, team_id = ctx
+    try:
+        my_team = await client.get_my_team(team_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch squad from FPL: {e}")
+
+    _, _, scored_players = await _get_scored_players(client)
+    by_id = {p.id: p for p in scored_players}
+
+    squad = []
+    for pick in my_team.get("picks", []):
+        player = by_id.get(pick["element"])
+        if player:
+            squad.append({
+                **player.model_dump(),
+                "position": pick.get("position"),
+                "is_captain": pick.get("is_captain"),
+                "is_vice_captain": pick.get("is_vice_captain"),
+                "multiplier": pick.get("multiplier"),
+            })
+    squad.sort(key=lambda p: p.get("position") or 99)
+
+    transfers_info = my_team.get("transfers", {})
+    return {
+        "squad": squad,
+        "bank": transfers_info.get("bank"),
+        "team_value": transfers_info.get("value"),
+        "free_transfers": transfers_info.get("limit"),
+    }
+
+
+@app.get("/recommendations")
+async def get_recommendations(ctx: tuple = Depends(current_fpl)):
+    _, client, team_id = ctx
+    try:
+        my_team = await client.get_my_team(team_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch squad from FPL: {e}")
+
+    _, _, scored_players = await _get_scored_players(client)
+
+    squad_ids = [pick["element"] for pick in my_team.get("picks", [])]
+    transfers_info = my_team.get("transfers", {})
+    bank = transfers_info.get("bank", 0)
+    free_transfers = transfers_info.get("limit") or 1
+
+    recs = recommend_transfers(squad_ids, bank, scored_players, free_transfers)
+    if not recs:
+        raise HTTPException(status_code=404, detail="No viable transfer found")
+    return recs
+
+
+@app.get("/players/search")
+async def search_players(q: str = "", element_type: Optional[int] = None, limit: int = 25,
+                         user: dict = Depends(current_user)):
+    """Name search over all players, for building a transfer by hand."""
     _, _, scored_players = await _get_scored_players()
+
+    needle = q.strip().lower()
+    matches = [
+        p for p in scored_players
+        if (element_type is None or p.element_type == element_type)
+        and (not needle or needle in p.web_name.lower() or needle in p.team_short_name.lower())
+    ]
+    matches.sort(key=lambda p: p.score, reverse=True)
+    return matches[:limit]
+
+
+@app.post("/transfer/preview")
+async def preview_transfer(req: TransferPreviewRequest, ctx: tuple = Depends(current_fpl)):
+    """Validate a hand-built transfer and show its effect, without executing."""
+    _, client, team_id = ctx
+    my_team = await client.get_my_team(team_id)
+    _, _, scored_players = await _get_scored_players(client)
 
     _, player_out, player_in, selling_price = await _validate_transfer(
         my_team, scored_players, req.element_out, req.element_in
@@ -352,15 +456,15 @@ async def preview_transfer(req: TransferPreviewRequest):
 
 
 @app.post("/transfer/execute")
-async def execute_transfer(req: TransferExecuteRequest):
-    team_id = await _require_connection()
+async def execute_transfer(req: TransferExecuteRequest, ctx: tuple = Depends(current_fpl)):
+    user, client, team_id = ctx
 
-    gw_info = await fpl_client.get_gameweek_info()
+    gw_info = await client.get_gameweek_info()
     event = req.event or gw_info.get("next_event") or gw_info.get("current_event")
     if event is None:
         raise HTTPException(status_code=400, detail="Could not determine target gameweek")
 
-    my_team = await fpl_client.get_my_team(team_id)
+    my_team = await client.get_my_team(team_id)
 
     if not req.accept_hit:
         free_transfers = (my_team.get("transfers") or {}).get("limit")
@@ -370,10 +474,9 @@ async def execute_transfer(req: TransferExecuteRequest):
                 detail="This transfer would cost a 4-point hit. Resubmit with accept_hit=true to confirm.",
             )
 
-    # Validate here too -- manual transfers can be invalid in ways the
-    # recommender never produces. FPL pays out the pick's own selling_price,
-    # which lags now_cost once the player's price has moved.
-    _, _, scored_players = await _get_scored_players()
+    # FPL pays out the pick's own selling_price, which lags now_cost once the
+    # player's price has moved since you bought them.
+    _, _, scored_players = await _get_scored_players(client)
     _, _, _, selling_price = await _validate_transfer(
         my_team, scored_players, req.element_out, req.element_in
     )
@@ -388,11 +491,12 @@ async def execute_transfer(req: TransferExecuteRequest):
     )
 
     try:
-        result = await fpl_client.execute_transfer(payload)
+        result = await client.execute_transfer(payload)
     except FPLTransferError as e:
         raise HTTPException(status_code=422, detail={"message": str(e), "fpl_response": e.payload})
 
     transfer_id = await db.insert_transfer(
+        user_id=user["id"],
         gameweek=event,
         player_out_id=req.element_out,
         player_out_name=req.player_out_name,
@@ -406,19 +510,13 @@ async def execute_transfer(req: TransferExecuteRequest):
 
 
 @app.get("/history")
-async def get_history(limit: int = 100):
-    return await db.get_transfers(limit=limit)
-
-
-@app.get("/players")
-async def get_players():
-    _, _, scored_players = await _get_scored_players()
-    return scored_players
+async def get_history(limit: int = 100, user: dict = Depends(current_user)):
+    return await db.get_transfers(user["id"], limit=limit)
 
 
 @app.get("/gameweek")
 async def get_gameweek() -> GameweekInfo:
-    gw = await fpl_client.get_gameweek_info()
+    gw = await FPLClient().get_gameweek_info()
     return GameweekInfo(**gw)
 
 

@@ -5,12 +5,10 @@ The FPL API is undocumented and reverse-engineered from browser traffic on
 fantasy.premierleague.com. If the transfer endpoint starts failing, check
 devtools on the live site first -- these contracts can change without notice.
 
-Login itself is no longer handled here: FPL moved auth to OAuth2/OIDC
-(PingOne), and the API now authenticates with an `Authorization: Bearer
-<access_token>` header -- the old sessionid/pl_profile session cookies no
-longer exist at all. See browser_login.py -- a real browser window handles
-the actual login, and this client adopts the resulting token via
-load_token().
+Auth is an `Authorization: Bearer <access_token>` header; the old
+sessionid/pl_profile session cookies no longer exist. Each user supplies
+their own token, so a client instance is cheap and scoped to one user --
+one shared HTTP connection pool underneath, with the token passed per call.
 """
 from __future__ import annotations
 
@@ -20,12 +18,7 @@ from typing import Optional
 
 import httpx
 
-from cache import (
-    get_bootstrap_cache,
-    load_session_token,
-    save_session_token,
-    set_bootstrap_cache,
-)
+from cache import get_bootstrap_cache, set_bootstrap_cache
 from models import TransferPayload
 
 logger = logging.getLogger("fpl_client")
@@ -43,6 +36,23 @@ DEFAULT_HEADERS = {
     ),
 }
 
+# One pool shared by every user; per-user auth travels in request headers.
+_http: Optional[httpx.AsyncClient] = None
+
+
+def _client() -> httpx.AsyncClient:
+    global _http
+    if _http is None:
+        _http = httpx.AsyncClient(headers=DEFAULT_HEADERS, timeout=15.0, follow_redirects=True)
+    return _http
+
+
+async def aclose() -> None:
+    global _http
+    if _http is not None:
+        await _http.aclose()
+        _http = None
+
 
 class FPLAuthError(Exception):
     pass
@@ -55,93 +65,65 @@ class FPLTransferError(Exception):
 
 
 class FPLClient:
-    def __init__(self):
-        self.session = httpx.AsyncClient(headers=DEFAULT_HEADERS, timeout=15.0, follow_redirects=True)
-        self._logged_in = False
+    """Scoped to a single user's FPL session (or none, for public data)."""
 
-    async def aclose(self):
-        await self.session.aclose()
+    def __init__(self, access_token: Optional[str] = None):
+        self.access_token = access_token
 
+    @property
+    def _auth_headers(self) -> dict:
+        return {"Authorization": f"Bearer {self.access_token}"} if self.access_token else {}
 
-    def _apply_token(self, access_token: str) -> None:
-        self.session.headers["Authorization"] = f"Bearer {access_token}"
+    # ------------------------------------------------------------- auth --- #
 
-    async def _authenticated_ok(self) -> bool:
-        """An authenticated /api/me/ returns a non-null player."""
+    async def get_player(self) -> Optional[dict]:
+        """The signed-in player, or None if the token is missing/expired."""
+        if not self.access_token:
+            return None
         try:
-            resp = await self.session.get(ME_URL)
+            resp = await _client().get(ME_URL, headers=self._auth_headers)
         except httpx.HTTPError:
-            return False
+            return None
         if resp.status_code != 200:
-            return False
+            return None
         try:
-            return bool((resp.json() or {}).get("player"))
+            return (resp.json() or {}).get("player")
         except ValueError:
-            return False
+            return None
 
-    async def restore_session(self) -> bool:
-        """Try to reuse a previously saved token (from Redis) instead of logging in again."""
-        bundle = await load_session_token()
-        if not bundle or not bundle.get("access_token"):
-            return False
-        self._apply_token(bundle["access_token"])
-        if await self._authenticated_ok():
-            self._logged_in = True
-            return True
-        self.session.headers.pop("Authorization", None)
-        return False
+    async def verify(self) -> dict:
+        """Raise unless the token currently works, returning the player."""
+        player = await self.get_player()
+        if not player:
+            raise FPLAuthError("That FPL session was rejected -- reconnect your account")
+        return player
 
-    def is_logged_in(self) -> bool:
-        return self._logged_in
+    async def get_my_entry_id(self) -> Optional[int]:
+        player = await self.get_player()
+        entry = (player or {}).get("entry")
+        return int(entry) if entry else None
 
-    async def logout(self) -> None:
-        self.session.headers.pop("Authorization", None)
-        self.session.cookies.clear()
-        self._logged_in = False
-
-    async def load_token(self, bundle: dict) -> None:
-        """Adopt an OIDC token bundle captured from a real browser sign-in."""
-        access_token = (bundle or {}).get("access_token")
-        if not access_token:
-            raise FPLAuthError("No access token found in that sign-in")
-
-        self._apply_token(access_token)
-        if not await self._authenticated_ok():
-            self.session.headers.pop("Authorization", None)
-            raise FPLAuthError("That FPL session was rejected -- try signing in again")
-
-        self._logged_in = True
-        await save_session_token(bundle)
-
+    # ------------------------------------------------------------ reads --- #
 
     async def get_bootstrap(self, force_refresh: bool = False) -> dict:
         if not force_refresh:
             cached = await get_bootstrap_cache()
             if cached is not None:
                 return cached
-        resp = await self.session.get(BOOTSTRAP_URL)
+        resp = await _client().get(BOOTSTRAP_URL)
         resp.raise_for_status()
         data = resp.json()
         await set_bootstrap_cache(data)
         return data
 
-    async def get_my_entry_id(self) -> Optional[int]:
-        """The logged-in user's own team id, straight from /api/me/."""
-        resp = await self.session.get(ME_URL)
-        if resp.status_code != 200:
-            return None
-        player = (resp.json() or {}).get("player") or {}
-        entry = player.get("entry")
-        return int(entry) if entry else None
-
     async def get_my_team(self, team_id: int) -> dict:
-        resp = await self.session.get(MY_TEAM_URL.format(team_id=team_id))
+        resp = await _client().get(MY_TEAM_URL.format(team_id=team_id), headers=self._auth_headers)
         resp.raise_for_status()
         return resp.json()
 
     async def get_fixtures(self, event: Optional[int] = None) -> list[dict]:
         params = {"event": event} if event is not None else {}
-        resp = await self.session.get(FIXTURES_URL, params=params)
+        resp = await _client().get(FIXTURES_URL, params=params)
         resp.raise_for_status()
         return resp.json()
 
@@ -156,11 +138,10 @@ class FPLClient:
             "next_deadline_time": nxt.get("deadline_time") if nxt else None,
         }
 
+    # ------------------------------------------------------------ write --- #
 
     async def execute_transfer(self, transfer: TransferPayload) -> dict:
-        # Auth is the Bearer token on the session; the old CSRF cookie went
-        # away with the Django login.
-        if not self._logged_in:
+        if not self.access_token:
             raise FPLTransferError("Not signed in to FPL")
 
         body = {
@@ -177,10 +158,11 @@ class FPLClient:
             ],
         }
 
-        resp = await self.session.post(
+        resp = await _client().post(
             TRANSFERS_URL,
             json=body,
             headers={
+                **self._auth_headers,
                 "Referer": "https://fantasy.premierleague.com/",
                 "Content-Type": "application/json",
             },

@@ -1,4 +1,4 @@
-"""Redis helpers: player data cache, session cookie persistence."""
+"""Redis helpers: shared player-data cache and per-user login sessions."""
 from __future__ import annotations
 
 import json
@@ -7,13 +7,14 @@ from typing import Any, Optional
 
 import redis.asyncio as redis
 
+from security import SESSION_TTL_SECONDS
+
 REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379")
 
 BOOTSTRAP_KEY = "fpl:bootstrap"
 BOOTSTRAP_TTL = 1800  # 30 minutes, per FPL rate-limit guidance
 
-TOKEN_KEY = "fpl:session_token"
-TEAM_ID_KEY = "fpl:team_id"
+SESSION_PREFIX = "session:"
 
 _client: Optional[redis.Redis] = None
 
@@ -34,6 +35,8 @@ async def set_json(key: str, value: Any, ex: Optional[int] = None) -> None:
     await get_client().set(key, json.dumps(value), ex=ex)
 
 
+# bootstrap-static is public data and identical for everyone, so it stays a
+# single shared cache rather than one copy per user.
 async def get_bootstrap_cache() -> Optional[dict]:
     return await get_json(BOOTSTRAP_KEY)
 
@@ -42,24 +45,17 @@ async def set_bootstrap_cache(data: dict) -> None:
     await set_json(BOOTSTRAP_KEY, data, ex=BOOTSTRAP_TTL)
 
 
-async def save_session_token(bundle: dict) -> None:
-    # No TTL: the token is re-validated on use, and the user re-signs in when
-    # it eventually expires.
-    await set_json(TOKEN_KEY, bundle)
+# ------------------------------------------------------------- sessions --- #
 
 
-async def load_session_token() -> Optional[dict]:
-    return await get_json(TOKEN_KEY)
+async def create_session(session_id: str, user_id: int) -> None:
+    await get_client().set(SESSION_PREFIX + session_id, str(user_id), ex=SESSION_TTL_SECONDS)
 
 
-async def set_team_id(team_id: int) -> None:
-    await get_client().set(TEAM_ID_KEY, str(team_id))
-
-
-async def get_team_id() -> Optional[int]:
-    raw = await get_client().get(TEAM_ID_KEY)
+async def get_session_user_id(session_id: str) -> Optional[int]:
+    raw = await get_client().get(SESSION_PREFIX + session_id)
     return int(raw) if raw is not None else None
 
 
-async def clear_session() -> None:
-    await get_client().delete(TOKEN_KEY, TEAM_ID_KEY)
+async def delete_session(session_id: str) -> None:
+    await get_client().delete(SESSION_PREFIX + session_id)
