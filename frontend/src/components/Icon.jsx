@@ -1,8 +1,3 @@
-/**
- * Inline SVG icons on a 24x24 grid, stroked with currentColor so they inherit
- * text colour and sizing. Replaces the emoji the UI used to lean on -- emoji
- * render differently per-platform and never match a deliberate visual style.
- */
 const PATHS = {
   squad: "M16 3.13a4 4 0 0 1 0 7.75M21 21v-2a4 4 0 0 0-3-3.87M7 7a4 4 0 1 0 8 0 4 4 0 0 0-8 0M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2",
   pitch: "M3 5h18v14H3zM12 5v14M3 9h3v6H3M18 9h3v6h-3M12 9a3 3 0 0 0 0 6",

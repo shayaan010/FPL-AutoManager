@@ -10,12 +10,6 @@ function invalidateAfterConnect(queryClient) {
   queryClient.invalidateQueries({ queryKey: ["history"] });
 }
 
-/**
- * The bookmarklet runs inside the fantasy.premierleague.com tab, where it is
- * allowed to read that page's own localStorage. It hands the token back by
- * navigating to us with it in the URL fragment -- a redirect rather than a
- * fetch, so FPL's Content-Security-Policy can't block it.
- */
 function bookmarkletSource() {
   const target = `${window.location.origin}${window.location.pathname}`;
   return `javascript:(function(){try{var k=Object.keys(localStorage).find(function(x){return x.indexOf('oidc.user:')===0});if(!k){alert('Sign in at fantasy.premierleague.com first, then click this again.');return}var t=JSON.parse(localStorage.getItem(k)).access_token;if(!t){alert('Signed in, but no FPL token found. Reload the page and try again.');return}location.href='${target}#fpl_token='+encodeURIComponent(t)}catch(e){alert('Could not read your FPL session: '+e.message)}})()`;
@@ -151,9 +145,7 @@ function LocalBrowserLogin({ onConnected }) {
           setError(s.error || "Sign-in failed");
           setPhase("idle");
         }
-      } catch {
-        /* transient — retry next tick */
-      }
+      } catch { }
     }, 1500);
   };
 

@@ -1,15 +1,3 @@
-"""
-FPL API wrapper (read + write).
-
-The FPL API is undocumented and reverse-engineered from browser traffic on
-fantasy.premierleague.com. If the transfer endpoint starts failing, check
-devtools on the live site first -- these contracts can change without notice.
-
-Auth is an `Authorization: Bearer <access_token>` header; the old
-sessionid/pl_profile session cookies no longer exist. Each user supplies
-their own token, so a client instance is cheap and scoped to one user --
-one shared HTTP connection pool underneath, with the token passed per call.
-"""
 from __future__ import annotations
 
 import logging
@@ -36,7 +24,6 @@ DEFAULT_HEADERS = {
     ),
 }
 
-# One pool shared by every user; per-user auth travels in request headers.
 _http: Optional[httpx.AsyncClient] = None
 
 
@@ -65,7 +52,6 @@ class FPLTransferError(Exception):
 
 
 class FPLClient:
-    """Scoped to a single user's FPL session (or none, for public data)."""
 
     def __init__(self, access_token: Optional[str] = None):
         self.access_token = access_token
@@ -74,10 +60,8 @@ class FPLClient:
     def _auth_headers(self) -> dict:
         return {"Authorization": f"Bearer {self.access_token}"} if self.access_token else {}
 
-    # ------------------------------------------------------------- auth --- #
 
     async def get_player(self) -> Optional[dict]:
-        """The signed-in player, or None if the token is missing/expired."""
         if not self.access_token:
             return None
         try:
@@ -92,7 +76,6 @@ class FPLClient:
             return None
 
     async def verify(self) -> dict:
-        """Raise unless the token currently works, returning the player."""
         player = await self.get_player()
         if not player:
             raise FPLAuthError("That FPL session was rejected -- reconnect your account")
@@ -103,7 +86,6 @@ class FPLClient:
         entry = (player or {}).get("entry")
         return int(entry) if entry else None
 
-    # ------------------------------------------------------------ reads --- #
 
     async def get_bootstrap(self, force_refresh: bool = False) -> dict:
         if not force_refresh:
@@ -138,7 +120,6 @@ class FPLClient:
             "next_deadline_time": nxt.get("deadline_time") if nxt else None,
         }
 
-    # ------------------------------------------------------------ write --- #
 
     async def execute_transfer(self, transfer: TransferPayload) -> dict:
         if not self.access_token:
@@ -175,9 +156,6 @@ class FPLClient:
                 payload = {"raw": resp.text}
             raise FPLTransferError(f"Transfer rejected ({resp.status_code})", payload=payload)
 
-        # A successful transfer comes back 200 with an empty body -- parsing that
-        # as JSON used to raise, which made a completed transfer look like a
-        # failure and skipped logging it.
         if not resp.content:
             return {"status": "ok"}
         try:

@@ -1,4 +1,3 @@
-"""Pydantic models shared across the backend."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -23,31 +22,30 @@ class UserOut(BaseModel):
 
 
 class AuthStatus(BaseModel):
-    """Whether the signed-in user has linked an FPL account."""
     connected: bool
     team_id: Optional[int] = None
 
 
 class BrowserLoginStartRequest(BaseModel):
-    fresh: bool = False  # wipe the browser profile so a different account can sign in
+    fresh: bool = False  
 
 
 class BrowserLoginState(BaseModel):
-    status: str  # idle | waiting | success | error
+    status: str  
     error: Optional[str] = None
 
 
 class TokenLoginRequest(BaseModel):
     access_token: str
-    team_id: Optional[int] = None  # derived from the session when omitted
+    team_id: Optional[int] = None  
 
 
 class TransferPayload(BaseModel):
-    entry: int  # the manager's team id -- required by the transfers endpoint
+    entry: int  
     element_in: int
-    purchase_price: int  # what the incoming player costs now, * 10
+    purchase_price: int  
     element_out: int
-    selling_price: int  # what FPL will actually pay you, * 10 (not the same as now_cost)
+    selling_price: int  
     event: int
     chip: Optional[str] = None
 
@@ -57,7 +55,7 @@ class ScoredPlayer(BaseModel):
     web_name: str
     team: int
     team_short_name: str = ""
-    team_code: Optional[int] = None  # used for the kit image on the pitch view
+    team_code: Optional[int] = None  
     element_type: int
     now_cost: int
     event_points: int = 0

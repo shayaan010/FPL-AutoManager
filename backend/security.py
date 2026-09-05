@@ -1,10 +1,3 @@
-"""
-Password hashing, session tokens, and encryption for stored FPL tokens.
-
-An FPL access token grants full control of someone's team, so tokens are
-encrypted at rest rather than stored raw -- a leaked database dump alone
-shouldn't hand over anyone's squad.
-"""
 from __future__ import annotations
 
 import base64
@@ -22,21 +15,26 @@ logger = logging.getLogger("security")
 _hasher = PasswordHasher()
 
 SESSION_COOKIE = "fpl_session"
-SESSION_TTL_SECONDS = 60 * 60 * 24 * 30  # 30 days
+SESSION_TTL_SECONDS = 60 * 60 * 24 * 30  
 
 APP_SECRET_KEY = os.environ.get("APP_SECRET_KEY", "")
+_IS_PRODUCTION = (
+    os.environ.get("ENVIRONMENT", "").lower() == "production"
+    or os.environ.get("FRONTEND_ORIGIN", "").startswith("https://")
+)
 
 if not APP_SECRET_KEY:
-    # Dev convenience only: without a stable key, stored tokens become
-    # unreadable on every restart, so warn loudly rather than fail silently.
+    if _IS_PRODUCTION:
+        raise RuntimeError(
+            "APP_SECRET_KEY must be set in production. Generate one with: "
+            "python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+        )
     APP_SECRET_KEY = "dev-insecure-key-set-APP_SECRET_KEY-in-production"
     logger.warning(
         "APP_SECRET_KEY is not set -- using an insecure development key. "
         "Set APP_SECRET_KEY in production or stored FPL tokens will be readable."
     )
 
-# Fernet needs a 32-byte urlsafe-base64 key; derive one from whatever secret
-# was provided so operators can use any random string.
 _fernet = Fernet(base64.urlsafe_b64encode(hashlib.sha256(APP_SECRET_KEY.encode()).digest()))
 
 
@@ -68,7 +66,6 @@ def encrypt(plaintext: str) -> str:
 
 
 def decrypt(ciphertext: str) -> str | None:
-    """Returns None when the value can't be decrypted (e.g. the key changed)."""
     try:
         return _fernet.decrypt(ciphertext.encode()).decode()
     except (InvalidToken, ValueError):

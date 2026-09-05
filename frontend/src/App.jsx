@@ -22,9 +22,7 @@ function friendlyError(error) {
     const parsed = JSON.parse(raw);
     if (typeof parsed === "string") return parsed;
     if (parsed?.message) return parsed.message;
-  } catch {
-    // not JSON, fall through to raw message
-  }
+  } catch { }
   return raw.replace(/^"|"$/g, "");
 }
 
@@ -37,8 +35,6 @@ export default function App() {
     retry: false,
   });
 
-  // The bookmarklet returns here with the FPL token in the URL fragment.
-  // Consume it, then strip it from the address bar and history.
   const [linking, setLinking] = useState(false);
   useEffect(() => {
     const match = window.location.hash.match(/fpl_token=([^&]+)/);

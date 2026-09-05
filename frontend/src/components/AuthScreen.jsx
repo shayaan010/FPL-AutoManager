@@ -5,7 +5,7 @@ import Icon from "./Icon";
 import ThemeToggle from "./ThemeToggle";
 
 export default function AuthScreen() {
-  const [mode, setMode] = useState("signin"); // signin | register
+  const [mode, setMode] = useState("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState(null);

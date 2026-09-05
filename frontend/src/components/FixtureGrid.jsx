@@ -2,7 +2,6 @@ import EmptyState from "./EmptyState";
 
 const POSITION_NAMES = { 1: "GKP", 2: "DEF", 3: "MID", 4: "FWD" };
 
-// FDR 1-2 is a kind fixture, 3 is neutral, 4-5 is hard.
 function difficultyClass(difficulty) {
   if (difficulty <= 2) return "good";
   if (difficulty === 3) return "mid";

@@ -1,4 +1,3 @@
-"""FastAPI app: routes + WebSocket server for FPL Auto-Manager."""
 from __future__ import annotations
 
 import asyncio
@@ -14,10 +13,6 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response, WebSocke
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-# Playwright needs ProactorEventLoop for subprocess support on Windows, but
-# uvicorn's default loop there is SelectorEventLoop -- under that, browser
-# launch doesn't error, it just hangs forever. Must be set before uvicorn
-# creates its event loop.
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
@@ -26,6 +21,7 @@ load_dotenv()
 import cache
 import db
 import fpl_client as fpl
+import ratelimit
 import security
 from fpl_client import FPLAuthError, FPLClient, FPLTransferError
 from models import (
@@ -47,9 +43,6 @@ from scheduler import scheduler, start_scheduler
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("main")
 
-# Server-side browser sign-in only works when a person is sitting at the
-# machine running the backend, so it's a local-dev convenience and is off by
-# default in a deployed environment.
 ENABLE_BROWSER_LOGIN = os.environ.get("ENABLE_BROWSER_LOGIN", "").lower() in ("1", "true", "yes")
 
 
@@ -103,26 +96,29 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+    if IS_PRODUCTION:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    """
-    Without this, an unhandled error returns a bare 500 with no CORS headers,
-    which the browser surfaces as an opaque "Failed to fetch" -- hiding what
-    actually went wrong.
-    """
     logger.exception("Unhandled error on %s %s", request.method, request.url.path)
     return JSONResponse(
         status_code=500,
-        content={"detail": {"message": f"Server error: {exc}"}},
+        content={"detail": {"message": "Something went wrong. Please try again."}},
         headers={"Access-Control-Allow-Origin": FRONTEND_ORIGIN, "Access-Control-Allow-Credentials": "true"},
     )
 
 
-# ------------------------------------------------------------ accounts --- #
-
-
 async def current_user(request: Request) -> dict:
-    """The signed-in app user, or 401."""
     session_id = request.cookies.get(security.SESSION_COOKIE)
     if not session_id:
         raise HTTPException(status_code=401, detail="Not signed in")
@@ -136,7 +132,6 @@ async def current_user(request: Request) -> dict:
 
 
 async def current_fpl(user: dict = Depends(current_user)) -> tuple[dict, FPLClient, int]:
-    """The user's linked FPL session, or 428 if they haven't connected one."""
     conn = await db.get_fpl_connection(user["id"])
     if not conn:
         raise HTTPException(status_code=428, detail="FPL account not connected")
@@ -157,9 +152,6 @@ def _set_session_cookie(response: Response, session_id: str) -> None:
         session_id,
         max_age=security.SESSION_TTL_SECONDS,
         httponly=True,
-        # Frontend and API sit on different domains in production, so the
-        # cookie has to be SameSite=None -- which browsers only accept when
-        # it is also Secure.
         samesite="none" if IS_PRODUCTION else "lax",
         secure=IS_PRODUCTION,
         path="/",
@@ -167,7 +159,8 @@ def _set_session_cookie(response: Response, session_id: str) -> None:
 
 
 @app.post("/account/register")
-async def register(req: RegisterRequest, response: Response) -> UserOut:
+async def register(req: RegisterRequest, request: Request, response: Response) -> UserOut:
+    await ratelimit.limit_register(request)
     email = req.email.lower().strip()
     user = await db.create_user(email, security.hash_password(req.password))
     if not user:
@@ -180,12 +173,11 @@ async def register(req: RegisterRequest, response: Response) -> UserOut:
 
 
 @app.post("/account/login")
-async def login(req: LoginRequest, response: Response) -> UserOut:
+async def login(req: LoginRequest, request: Request, response: Response) -> UserOut:
     email = req.email.lower().strip()
+    await ratelimit.limit_login(request, email)
     user = await db.get_user_by_email(email)
     if not user or not security.verify_password(req.password, user["password_hash"]):
-        # Same message either way so the endpoint can't be used to discover
-        # which emails are registered.
         raise HTTPException(status_code=401, detail="Incorrect email or password")
 
     if security.needs_rehash(user["password_hash"]):
@@ -211,9 +203,6 @@ async def me(user: dict = Depends(current_user)) -> UserOut:
     return UserOut(**user)
 
 
-# --------------------------------------------------- fpl account link --- #
-
-
 @app.get("/auth/status")
 async def auth_status(user: dict = Depends(current_user)) -> AuthStatus:
     conn = await db.get_fpl_connection(user["id"])
@@ -223,8 +212,9 @@ async def auth_status(user: dict = Depends(current_user)) -> AuthStatus:
 
 
 @app.post("/auth/token")
-async def link_fpl_account(req: TokenLoginRequest, user: dict = Depends(current_user)):
-    """Link an FPL access token the user captured in their own browser."""
+async def link_fpl_account(req: TokenLoginRequest, request: Request,
+                           user: dict = Depends(current_user)):
+    await ratelimit.limit_link_token(request, user["id"])
     client = FPLClient(req.access_token)
     try:
         player = await client.verify()
@@ -245,9 +235,6 @@ async def unlink_fpl_account(user: dict = Depends(current_user)):
     return {"status": "ok"}
 
 
-# Local-only convenience: opens a real browser on the machine running the
-# backend. Useless when deployed (there's no desktop, and the user is
-# elsewhere), so it stays behind ENABLE_BROWSER_LOGIN.
 browser_login_state: dict = {"status": "idle", "error": None}
 
 
@@ -297,11 +284,7 @@ async def browser_login_status(user: dict = Depends(current_user)) -> BrowserLog
 
 @app.get("/config")
 async def config():
-    """Lets the frontend show only the connect methods this deployment supports."""
     return {"browser_login": ENABLE_BROWSER_LOGIN}
-
-
-# ------------------------------------------------------------- shared --- #
 
 
 async def _get_scored_players(client: Optional[FPLClient] = None):
@@ -312,10 +295,6 @@ async def _get_scored_players(client: Optional[FPLClient] = None):
 
 
 async def _validate_transfer(my_team: dict, scored_players: list, element_out: int, element_in: int):
-    """
-    Manual transfers can be nonsense in ways the recommender never produces --
-    wrong position, unaffordable, already owned -- so check before we ask FPL.
-    """
     by_id = {p.id: p for p in scored_players}
     picks = my_team.get("picks", [])
     squad_ids = {p.get("element") for p in picks}
@@ -354,9 +333,6 @@ async def _validate_transfer(my_team: dict, scored_players: list, element_out: i
         )
 
     return out_pick, player_out, player_in, selling_price
-
-
-# -------------------------------------------------------------- squad --- #
 
 
 @app.get("/squad")
@@ -426,7 +402,6 @@ async def get_recommendations(ctx: tuple = Depends(current_fpl)):
 @app.get("/players/search")
 async def search_players(q: str = "", element_type: Optional[int] = None, limit: int = 25,
                          user: dict = Depends(current_user)):
-    """Name search over all players, for building a transfer by hand."""
     _, _, scored_players = await _get_scored_players()
 
     needle = q.strip().lower()
@@ -441,7 +416,6 @@ async def search_players(q: str = "", element_type: Optional[int] = None, limit:
 
 @app.post("/transfer/preview")
 async def preview_transfer(req: TransferPreviewRequest, ctx: tuple = Depends(current_fpl)):
-    """Validate a hand-built transfer and show its effect, without executing."""
     _, client, team_id = ctx
     my_team = await client.get_my_team(team_id)
     _, _, scored_players = await _get_scored_players(client)
@@ -469,6 +443,7 @@ async def preview_transfer(req: TransferPreviewRequest, ctx: tuple = Depends(cur
 @app.post("/transfer/execute")
 async def execute_transfer(req: TransferExecuteRequest, ctx: tuple = Depends(current_fpl)):
     user, client, team_id = ctx
+    await ratelimit.limit_transfer(user["id"])
 
     gw_info = await client.get_gameweek_info()
     event = req.event or gw_info.get("next_event") or gw_info.get("current_event")
@@ -485,8 +460,6 @@ async def execute_transfer(req: TransferExecuteRequest, ctx: tuple = Depends(cur
                 detail="This transfer would cost a 4-point hit. Resubmit with accept_hit=true to confirm.",
             )
 
-    # FPL pays out the pick's own selling_price, which lags now_cost once the
-    # player's price has moved since you bought them.
     _, _, scored_players = await _get_scored_players(client)
     _, _, _, selling_price = await _validate_transfer(
         my_team, scored_players, req.element_out, req.element_in
@@ -536,7 +509,6 @@ async def ws_deadline(websocket: WebSocket):
     await ws_manager.connect(websocket)
     try:
         while True:
-            # Client doesn't need to send anything; just keep the connection alive.
             await websocket.receive_text()
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)

@@ -1,4 +1,3 @@
-"""Redis helpers: shared player-data cache and per-user login sessions."""
 from __future__ import annotations
 
 import json
@@ -12,7 +11,7 @@ from security import SESSION_TTL_SECONDS
 REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379")
 
 BOOTSTRAP_KEY = "fpl:bootstrap"
-BOOTSTRAP_TTL = 1800  # 30 minutes, per FPL rate-limit guidance
+BOOTSTRAP_TTL = 1800  
 
 SESSION_PREFIX = "session:"
 
@@ -35,17 +34,12 @@ async def set_json(key: str, value: Any, ex: Optional[int] = None) -> None:
     await get_client().set(key, json.dumps(value), ex=ex)
 
 
-# bootstrap-static is public data and identical for everyone, so it stays a
-# single shared cache rather than one copy per user.
 async def get_bootstrap_cache() -> Optional[dict]:
     return await get_json(BOOTSTRAP_KEY)
 
 
 async def set_bootstrap_cache(data: dict) -> None:
     await set_json(BOOTSTRAP_KEY, data, ex=BOOTSTRAP_TTL)
-
-
-# ------------------------------------------------------------- sessions --- #
 
 
 async def create_session(session_id: str, user_id: int) -> None:
@@ -59,3 +53,13 @@ async def get_session_user_id(session_id: str) -> Optional[int]:
 
 async def delete_session(session_id: str) -> None:
     await get_client().delete(SESSION_PREFIX + session_id)
+
+
+async def delete_all_sessions_for_user(user_id: int) -> int:
+    client = get_client()
+    removed = 0
+    async for key in client.scan_iter(match=SESSION_PREFIX + "*", count=200):
+        if await client.get(key) == str(user_id):
+            await client.delete(key)
+            removed += 1
+    return removed

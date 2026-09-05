@@ -2,7 +2,6 @@ import { useState } from "react";
 
 const POSITION_NAMES = { 1: "GKP", 2: "DEF", 3: "MID", 4: "FWD" };
 
-// FPL serves kit images off its own CDN, keyed by team code.
 function kitUrl(player) {
   if (!player.team_code) return null;
   const suffix = player.element_type === 1 ? "_1" : "";

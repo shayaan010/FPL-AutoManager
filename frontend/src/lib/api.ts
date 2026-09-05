@@ -1,7 +1,5 @@
 export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8010";
 
-/** Carries the HTTP status so callers can tell "signed out" (401) from
- *  "signed in but no FPL account linked" (428). */
 export class ApiError extends Error {
   status: number;
   constructor(message: string, status: number) {
@@ -15,7 +13,7 @@ function readableDetail(detail: unknown, status: number): string {
   if (detail && typeof detail === "object") {
     const d = detail as Record<string, unknown>;
     if (typeof d.message === "string") return d.message;
-    // FastAPI validation errors arrive as a list of field problems.
+
     if (Array.isArray(detail) && detail.length) {
       const first = detail[0] as Record<string, unknown>;
       if (typeof first?.msg === "string") return first.msg;
@@ -27,8 +25,7 @@ function readableDetail(detail: unknown, status: number): string {
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
-    // Session lives in an httpOnly cookie, and the API is on a different
-    // origin in production, so cookies must be sent explicitly.
+
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     ...options,
@@ -142,7 +139,6 @@ export const api = {
   getGameweek: () => request<GameweekInfo>("/gameweek"),
   getConfig: () => request<AppConfig>("/config"),
 
-  // --- app account ---
   register: (body: { email: string; password: string }) =>
     request<User>("/account/register", { method: "POST", body: JSON.stringify(body) }),
   signIn: (body: { email: string; password: string }) =>
@@ -150,7 +146,6 @@ export const api = {
   signOut: () => request<{ status: string }>("/account/logout", { method: "POST" }),
   getMe: () => request<User>("/account/me"),
 
-  // --- linked FPL account ---
   getAuthStatus: () => request<AuthStatus>("/auth/status"),
   unlinkFpl: () => request<{ status: string }>("/auth/logout", { method: "POST" }),
   browserLoginStart: (fresh = false) =>

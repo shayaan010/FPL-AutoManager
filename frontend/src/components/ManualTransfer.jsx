@@ -10,9 +10,7 @@ function readableError(message) {
     const detail = parsed?.detail ?? parsed;
     if (typeof detail === "string") return detail;
     if (detail?.message) return detail.message;
-  } catch {
-    /* not JSON */
-  }
+  } catch { }
   return message;
 }
 
@@ -102,8 +100,6 @@ export default function ManualTransfer({ squad = [], gameweek }) {
   const [done, setDone] = useState(null);
   const queryClient = useQueryClient();
 
-  // Ask the backend to validate as soon as both sides are chosen, so problems
-  // (wrong position, not enough money) surface before anything is submitted.
   useEffect(() => {
     setPreview(null);
     setError(null);

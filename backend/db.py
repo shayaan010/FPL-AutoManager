@@ -1,4 +1,3 @@
-"""PostgreSQL connection pool and queries (asyncpg)."""
 from __future__ import annotations
 
 import os
@@ -64,11 +63,7 @@ async def close_db() -> None:
         _pool = None
 
 
-# ---------------------------------------------------------------- users --- #
-
-
 async def create_user(email: str, password_hash: str) -> Optional[dict]:
-    """Returns None if the email is already registered."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         try:
@@ -101,9 +96,6 @@ async def update_password_hash(user_id: int, password_hash: str) -> None:
         await conn.execute("UPDATE users SET password_hash = $1 WHERE id = $2", password_hash, user_id)
 
 
-# ------------------------------------------------------ fpl connections --- #
-
-
 async def save_fpl_connection(user_id: int, team_id: Optional[int], token_encrypted: str) -> None:
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -131,9 +123,6 @@ async def delete_fpl_connection(user_id: int) -> None:
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM fpl_connections WHERE user_id = $1", user_id)
-
-
-# ------------------------------------------------------------ transfers --- #
 
 
 async def insert_transfer(

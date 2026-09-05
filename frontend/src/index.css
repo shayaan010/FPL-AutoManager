@@ -1,5 +1,4 @@
 :root {
-  /* --- Scale tokens: identical in both themes --- */
   --text-xs: 11px;
   --text-sm: 12px;
   --text-base: 13px;
@@ -29,7 +28,6 @@
   font-feature-settings: "cv02", "cv03", "cv04", "tnum";
 }
 
-/* --- Dark (default) --- */
 :root,
 [data-theme="dark"] {
   color-scheme: dark;
@@ -82,7 +80,6 @@
   --ring: 0 0 0 3px var(--accent-soft);
 }
 
-/* --- Light --- */
 [data-theme="light"] {
   color-scheme: light;
 
@@ -176,12 +173,9 @@ h1, h2, h3, h4 {
   vertical-align: -0.15em;
 }
 
-/* Numbers should line up in columns rather than jitter. */
 .tabular {
   font-variant-numeric: tabular-nums;
 }
-
-/* ---------- Layout ---------- */
 
 .app-shell {
   display: grid;
@@ -285,8 +279,6 @@ h1, h2, h3, h4 {
   color: var(--text-faint);
 }
 
-/* ---------- Cards ---------- */
-
 .card {
   background: var(--surface-1);
   border: 1px solid var(--border);
@@ -319,8 +311,6 @@ h1, h2, h3, h4 {
   margin-top: 2px;
   font-variant-numeric: tabular-nums;
 }
-
-/* ---------- Squad list ---------- */
 
 .squad-row {
   display: flex;
@@ -382,8 +372,6 @@ h1, h2, h3, h4 {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
-
-/* ---------- Transfer card ---------- */
 
 .transfer-card {
   display: grid;
@@ -508,8 +496,6 @@ h1, h2, h3, h4 {
   background: var(--accent-hover);
 }
 
-/* ---------- Fixture squares ---------- */
-
 .fixture-square {
   display: inline-block;
   width: 20px;
@@ -517,8 +503,6 @@ h1, h2, h3, h4 {
   border-radius: 5px;
   margin-right: 4px;
 }
-
-/* ---------- Countdown ---------- */
 
 .countdown-pill {
   display: flex;
@@ -554,8 +538,6 @@ h1, h2, h3, h4 {
   box-shadow: 0 0 0 3px var(--negative-soft);
 }
 
-/* ---------- Tables ---------- */
-
 table {
   width: 100%;
   border-collapse: collapse;
@@ -585,8 +567,6 @@ tbody tr:hover {
 tbody tr:last-child td {
   border-bottom: none;
 }
-
-/* ---------- Empty / error states ---------- */
 
 .empty-state {
   display: flex;
@@ -629,8 +609,6 @@ tbody tr:last-child td {
 .muted {
   color: var(--text-muted);
 }
-
-/* ---------- Connect account ---------- */
 
 .connect-btn {
   background: var(--accent);
@@ -766,14 +744,6 @@ tbody tr:last-child td {
   margin-top: 14px;
 }
 
-
-
-
-
-
-
-/* ---------- Auth screen ---------- */
-
 .auth-screen {
   min-height: 100vh;
   display: flex;
@@ -820,8 +790,6 @@ tbody tr:last-child td {
   white-space: nowrap;
   color: var(--text-muted);
 }
-
-/* ---------- Connect options ---------- */
 
 .connect-option {
   border: 1px solid var(--border);
@@ -878,8 +846,6 @@ tbody tr:last-child td {
 .bookmarklet:active {
   cursor: grabbing;
 }
-
-/* ---------- Recommendation nav + reasoning ---------- */
 
 .rec-nav {
   display: flex;
@@ -947,8 +913,6 @@ tbody tr:last-child td {
 .reasons li::marker {
   color: var(--accent);
 }
-
-/* ---------- Manual transfer builder ---------- */
 
 .manual-grid {
   display: grid;
@@ -1049,8 +1013,6 @@ tbody tr:last-child td {
   font-weight: 600;
   font-size: 13px;
 }
-
-/* ---------- Pitch view ---------- */
 
 .view-toggle {
   display: flex;
@@ -1215,9 +1177,6 @@ tbody tr:last-child td {
   font-size: 12px;
 }
 
-
-/* ---------- Utilities added during the design pass ---------- */
-
 .btn-block {
   width: 100%;
   margin-top: var(--space-2);
@@ -1279,8 +1238,6 @@ tbody tr:last-child td {
   flex: 1;
 }
 
-/* ---------- Theme toggle ---------- */
-
 .theme-toggle {
   display: grid;
   place-items: center;
@@ -1308,8 +1265,6 @@ tbody tr:last-child td {
   top: var(--space-5);
   right: var(--space-5);
 }
-
-/* ---------- Classes replacing former inline styles ---------- */
 
 .fixture-square.good { background: var(--fdr-good); }
 .fixture-square.mid  { background: var(--fdr-mid); }

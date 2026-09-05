@@ -94,7 +94,7 @@ Postgres and Redis are the only external services. The database schema is create
 |---|---|
 | `DATABASE_URL` | Postgres connection string |
 | `REDIS_URL` | Redis connection string |
-| `APP_SECRET_KEY` | **Required in production.** Encrypts stored FPL tokens — if it changes, every user must reconnect |
+| `APP_SECRET_KEY` | **Required in production** — the app refuses to start without it. Encrypts stored FPL tokens; if it changes, every user must reconnect |
 | `FRONTEND_ORIGIN` | The UI's origin. Sets CORS, and switches session cookies to `SameSite=None; Secure` when it is `https://` |
 | `ENABLE_BROWSER_LOGIN` | Local only. Enables the server-side browser sign-in described below |
 
@@ -141,6 +141,21 @@ The frontend deploys to **Vercel** from `frontend/`. The backend deploys to **Ra
 FPL's login is its own OIDC client, and its redirect URI only ever returns to `fantasy.premierleague.com`, so a third-party app cannot participate in that flow. Opening FPL in a tab is easy; reading the result is the blocked part, because the same-origin policy prevents this app's JavaScript from touching `fantasy.premierleague.com`'s `localStorage`.
 
 A bookmarklet is the one legitimate path: it runs *inside* the FPL tab, invoked explicitly by the user, so it is allowed to read that page's own storage. It hands the token back by navigating rather than by `fetch`, so FPL's Content-Security-Policy cannot block it.
+</details>
+
+<details>
+<summary><b>Security posture</b></summary>
+
+Because the app stores credentials that control other people's FPL teams, a few things are deliberate:
+
+- Passwords are hashed with **Argon2id**, and login returns the same message for a wrong password and an unknown email, so the endpoint can't be used to enumerate accounts
+- FPL tokens are **encrypted at rest** with Fernet, keyed from `APP_SECRET_KEY`
+- In production the app **refuses to boot** without `APP_SECRET_KEY`, rather than silently falling back to a key that is public in this repo
+- Sessions are opaque random IDs in Redis behind an **httpOnly** cookie, `Secure` and `SameSite=None` in production
+- **Rate limits** on sign-in (per IP and per email), registration, account linking, and transfers, all counted in Redis so they hold across instances
+- Every database query is parameterised
+- Unhandled errors return a generic message; the detail goes to the server log, never the client
+- `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, a restrictive `Content-Security-Policy`, and HSTS in production
 </details>
 
 <details>

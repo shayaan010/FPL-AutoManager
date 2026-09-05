@@ -27,9 +27,7 @@ export default function DeadlineCountdown() {
         try {
           const data = JSON.parse(event.data);
           if (typeof data.minutes_left === "number") setMinutesLeft(data.minutes_left);
-        } catch {
-          // ignore malformed frames
-        }
+        } catch { }
       };
       ws.onclose = () => {
         if (cancelled) return;

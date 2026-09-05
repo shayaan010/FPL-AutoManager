@@ -5,8 +5,7 @@ import Icon from "./Icon";
 export default function AccountMenu({ user }) {
   const signOut = useMutation({
     mutationFn: api.signOut,
-    // Reload rather than just clearing the query cache: it guarantees no
-    // component keeps a copy of the previous user's squad or history.
+
     onSettled: () => window.location.reload(),
   });
 

@@ -1,4 +1,3 @@
-"""APScheduler background jobs: player cache refresh + deadline countdown broadcast."""
 from __future__ import annotations
 
 import logging
@@ -33,8 +32,6 @@ def start_scheduler(fpl_client: FPLClient, ws_manager) -> None:
             logger.exception("Failed to broadcast deadline countdown")
 
     scheduler.add_job(refresh_player_cache, "interval", minutes=30, id="refresh_player_cache")
-    # Broadcast every minute so the frontend countdown is actually live; the spec's
-    # "every 5 minutes in the final 6 hours" would make the UI countdown feel stalled.
     scheduler.add_job(deadline_broadcast, "interval", minutes=1, id="deadline_broadcast")
 
     scheduler.start()

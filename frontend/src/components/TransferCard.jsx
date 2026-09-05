@@ -5,8 +5,6 @@ import { FixtureSquares } from "./FixtureGrid";
 
 const POSITION_NAMES = { 1: "GKP", 2: "DEF", 3: "MID", 4: "FWD" };
 
-// The FPL API returns nested field-level validation errors; flatten them into
-// something a person can actually read instead of dumping raw JSON.
 function readableError(message) {
   let parsed;
   try {

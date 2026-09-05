@@ -1,15 +1,7 @@
-"""
-Transfer recommendation logic. Pure Python scoring -- no LLM involved.
-
-Scores each player using fixture difficulty, recent form, ownership trend,
-price-change direction, and rotation/injury risk, then finds the squad swap
-with the largest score improvement.
-"""
 from __future__ import annotations
 
 from models import ScoredPlayer, TransferRecommendation
 
-# Weights are deliberately simple and hand-tuned, not fit to data.
 W_FORM = 2.0
 W_FIXTURE = 1.5
 W_OWNERSHIP = 0.05
@@ -20,7 +12,6 @@ POSITION_NAMES = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
 
 
 def _next_fixtures_for_player(player_id: int, teams_by_id: dict, fixtures: list[dict], team_id: int, n: int = 5) -> list[dict]:
-    """Pull the next n unplayed fixtures for a player's team, with a simple difficulty rating."""
     upcoming = [f for f in fixtures if not f.get("finished") and (f.get("team_h") == team_id or f.get("team_a") == team_id)]
     upcoming.sort(key=lambda f: (f.get("event") or 999, f.get("kickoff_time") or ""))
     out = []
@@ -39,10 +30,6 @@ def _next_fixtures_for_player(player_id: int, teams_by_id: dict, fixtures: list[
 
 
 def score_breakdown(player: dict, fixtures: list[dict]) -> dict:
-    """
-    Itemised score for one player, so the UI can explain its recommendations.
-    Fixtures must already be filtered to the player's team, soonest first.
-    """
     form = float(player.get("form") or 0.0)
 
     next_three = fixtures[:3]
@@ -62,7 +49,6 @@ def score_breakdown(player: dict, fixtures: list[dict]) -> dict:
         "form": round(form, 2),
         "form_points": round(W_FORM * form, 2),
         "avg_fdr": round(avg_fdr, 2),
-        # FDR 1 is a great fixture, 5 is a terrible one, so invert it.
         "fixture_points": round(W_FIXTURE * (5.0 - avg_fdr), 2),
         "ownership": round(ownership, 1),
         "ownership_points": round(W_OWNERSHIP * ownership, 2),
@@ -88,7 +74,6 @@ def _fmt(value: float) -> str:
 
 
 def build_reasons(out_b: dict, in_b: dict) -> list[str]:
-    """Plain-English justification for swapping one player for another."""
     reasons: list[str] = []
 
     d_form = in_b["form_points"] - out_b["form_points"]
@@ -187,12 +172,6 @@ def recommend_transfers(
     scored_players: list[ScoredPlayer],
     free_transfers: int = 1,
 ) -> list[TransferRecommendation]:
-    """
-    For every player in the squad, find the best affordable replacement at the
-    same position that isn't already owned. Returns one recommendation per
-    squad player, ranked by score gain -- so the UI can offer alternatives
-    rather than a single take-it-or-leave-it suggestion.
-    """
     by_id = {p.id: p for p in scored_players}
     squad = [by_id[pid] for pid in squad_player_ids if pid in by_id]
     if not squad:
