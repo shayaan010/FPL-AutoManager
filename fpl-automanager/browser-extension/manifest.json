@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "FPL Auto-Manager Connector",
+  "version": "1.0.0",
+  "description": "Connects your already-signed-in FPL session to your local FPL Auto-Manager app. Reads the site's access token only when you click Connect -- never touches your password.",
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "permissions": ["scripting", "tabs", "storage"],
+  "host_permissions": [
+    "https://fantasy.premierleague.com/*",
+    "http://localhost/*",
+    "http://localhost:8010/*"
+  ]
+}
