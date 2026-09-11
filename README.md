@@ -20,7 +20,6 @@
 3. [Connecting an FPL Account](#connecting-an-fpl-account)
 4. [How Scoring Works](#how-scoring-works)
 5. [Deployment](#deployment)
-6. [Key Design Decisions](#key-design-decisions)
 
 </details>
 
@@ -50,11 +49,8 @@ It is not a chatbot or a read-only recommender. Approving a transfer sends a rea
 
 | Layer | Tech |
 |---|---|
-| Backend | FastAPI + PostgreSQL (asyncpg) |
+| Backend | FastAPI + PostgreSQL |
 | Cache & sessions | Redis |
-| Background jobs | APScheduler |
-| HTTP client | httpx |
-| Security | Argon2id password hashing, Fernet token encryption |
 | Frontend | React 18 + Vite + TanStack Query |
 | Realtime | WebSocket |
 | Deployment | Railway (backend) + Vercel (frontend) |
@@ -133,69 +129,3 @@ The frontend deploys to **Vercel** from `frontend/`. The backend deploys to **Ra
 
 ---
 
-## Key Design Decisions
-
-<details>
-<summary><b>Why a bookmarklet instead of "Sign in with FPL"</b></summary>
-
-FPL's login is its own OIDC client, and its redirect URI only ever returns to `fantasy.premierleague.com`, so a third-party app cannot participate in that flow. Opening FPL in a tab is easy; reading the result is the blocked part, because the same-origin policy prevents this app's JavaScript from touching `fantasy.premierleague.com`'s `localStorage`.
-
-A bookmarklet is the one legitimate path: it runs *inside* the FPL tab, invoked explicitly by the user, so it is allowed to read that page's own storage. It hands the token back by navigating rather than by `fetch`, so FPL's Content-Security-Policy cannot block it.
-</details>
-
-<details>
-<summary><b>Security posture</b></summary>
-
-Because the app stores credentials that control other people's FPL teams, a few things are deliberate:
-
-- Passwords are hashed with **Argon2id**, and login returns the same message for a wrong password and an unknown email, so the endpoint can't be used to enumerate accounts
-- FPL tokens are **encrypted at rest** with Fernet, keyed from `APP_SECRET_KEY`
-- In production the app **refuses to boot** without `APP_SECRET_KEY`, rather than silently falling back to a key that is public in this repo
-- Sessions are opaque random IDs in Redis behind an **httpOnly** cookie, `Secure` and `SameSite=None` in production
-- **Rate limits** on sign-in (per IP and per email), registration, account linking, and transfers, all counted in Redis so they hold across instances
-- Every database query is parameterised
-- Unhandled errors return a generic message; the detail goes to the server log, never the client
-- `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, a restrictive `Content-Security-Policy`, and HSTS in production
-</details>
-
-<details>
-<summary><b>Why FPL tokens are encrypted at rest</b></summary>
-
-An FPL access token grants full control of someone's team, including transfers. Storing other people's tokens is a real responsibility, so they are encrypted with Fernet before they touch the database — a leaked dump alone is not enough to take over an account. The key comes from `APP_SECRET_KEY` and never leaves the environment.
-</details>
-
-<details>
-<summary><b>Why the server-side browser sign-in is local-only</b></summary>
-
-Locally the backend can launch Chrome, let you sign in, and read the token back over Chrome's DevTools port, because the browser and the backend are on the same machine. Deployed, that breaks for a physical reason: the server has no display, and the user is on a different computer entirely. Rather than delete a genuinely nice local flow, it sits behind `ENABLE_BROWSER_LOGIN`, and the frontend asks `/config` which methods this deployment actually supports.
-</details>
-
-<details>
-<summary><b>Why selling price comes from the squad, not the market price</b></summary>
-
-FPL pays out a pick's own `selling_price`, which lags `now_cost` because you only receive half of any price rise since you bought the player. Sending the current market price gets the transfer rejected, so the selling price is always read from the user's actual squad data.
-</details>
-
-<details>
-<summary><b>Why an empty 200 response counts as success</b></summary>
-
-A successful transfer returns `200` with an empty body. Parsing that as JSON raises, which originally made completed transfers look like failures — the transfer went through on FPL, the app reported an error, and nothing was logged. Empty bodies are now treated as success.
-</details>
-
-<details>
-<summary><b>Why unhandled errors are returned with CORS headers</b></summary>
-
-A bare `500` from an unhandled exception carries no CORS headers, so the browser reports it as an opaque "Failed to fetch" and hides the real cause. A catch-all handler returns the actual error with the right headers, which turns silent debugging dead-ends into readable messages.
-</details>
-
-<details>
-<summary><b>Why bootstrap-static is cached for 30 minutes</b></summary>
-
-FPL rate-limits aggressively, and `bootstrap-static` is a large payload containing every player. It is identical for every user, so it is cached once in Redis and refreshed by a background job rather than fetched per request or per account.
-</details>
-
-<details>
-<summary><b>Why there is a recommendation for every player</b></summary>
-
-A single "best transfer" is a take-it-or-leave-it suggestion, and dismissing it left the user with nothing. Instead the optimiser returns one best replacement per squad player, ranked by score gain, so the panel becomes a browsable list of options — and the reasoning stays honest, surfacing the downsides of each pick rather than only its upsides.
-</details>
