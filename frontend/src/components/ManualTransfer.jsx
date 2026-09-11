@@ -1,18 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
+import { readableError } from "../lib/errors";
 
 const POSITION_NAMES = { 1: "GKP", 2: "DEF", 3: "MID", 4: "FWD" };
-
-function readableError(message) {
-  try {
-    const parsed = JSON.parse(message);
-    const detail = parsed?.detail ?? parsed;
-    if (typeof detail === "string") return detail;
-    if (detail?.message) return detail.message;
-  } catch { }
-  return message;
-}
 
 function PlayerSearch({ position, onPick, picked, onClear }) {
   const [query, setQuery] = useState("");

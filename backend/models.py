@@ -73,7 +73,7 @@ class TransferRecommendation(BaseModel):
     player_in: ScoredPlayer
     score_delta: float
     is_hit: bool
-    free_transfers: int
+    free_transfers: Optional[int]
     reasons: list[str] = []
 
 

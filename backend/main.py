@@ -37,7 +37,7 @@ from models import (
     TransferPreviewRequest,
     UserOut,
 )
-from optimizer import POSITION_NAMES, build_reasons, build_scored_players, recommend_transfers
+from optimizer import MAX_PER_CLUB, POSITION_NAMES, build_reasons, build_scored_players, recommend_transfers
 from scheduler import scheduler, start_scheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -320,6 +320,21 @@ async def _validate_transfer(my_team: dict, scored_players: list, element_out: i
             ),
         )
 
+    # FPL caps a squad at 3 players per club and rejects the transfer outright,
+    # so check it here rather than surfacing a bare 400 from their API.
+    club_count = sum(
+        1 for pid in squad_ids
+        if pid != element_out and (p := by_id.get(pid)) and p.team == player_in.team
+    )
+    if club_count >= MAX_PER_CLUB:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"You'd have {club_count + 1} {player_in.team_short_name} players — "
+                f"FPL allows a maximum of {MAX_PER_CLUB} from one club"
+            ),
+        )
+
     selling_price = out_pick.get("selling_price", player_out.now_cost)
     bank = (my_team.get("transfers") or {}).get("bank", 0)
     budget = selling_price + bank
@@ -391,7 +406,10 @@ async def get_recommendations(ctx: tuple = Depends(current_fpl)):
     squad_ids = [pick["element"] for pick in my_team.get("picks", [])]
     transfers_info = my_team.get("transfers", {})
     bank = transfers_info.get("bank", 0)
-    free_transfers = transfers_info.get("limit") or 1
+    # FPL sends null for unlimited transfers (a chip is active, or the team was
+    # created mid-season). Only an explicit 0 means the next move costs a hit,
+    # so `or 1` here would hide the hit warning from anyone out of transfers.
+    free_transfers = transfers_info.get("limit")
 
     recs = recommend_transfers(squad_ids, bank, scored_players, free_transfers)
     if not recs:
@@ -461,14 +479,14 @@ async def execute_transfer(req: TransferExecuteRequest, ctx: tuple = Depends(cur
             )
 
     _, _, scored_players = await _get_scored_players(client)
-    _, _, _, selling_price = await _validate_transfer(
+    _, _, player_in, selling_price = await _validate_transfer(
         my_team, scored_players, req.element_out, req.element_in
     )
 
     payload = TransferPayload(
         entry=team_id,
         element_in=req.element_in,
-        purchase_price=req.element_in_cost,
+        purchase_price=player_in.now_cost,
         element_out=req.element_out,
         selling_price=selling_price,
         event=event,
@@ -477,6 +495,14 @@ async def execute_transfer(req: TransferExecuteRequest, ctx: tuple = Depends(cur
     try:
         result = await client.execute_transfer(payload)
     except FPLTransferError as e:
+        active_chips = [
+            c.get("name") for c in (my_team.get("chips") or [])
+            if c.get("status_for_entry") == "active"
+        ]
+        logger.warning(
+            "FPL rejected transfer: sent=%s transfers=%s active_chips=%s fpl_response=%s",
+            payload.model_dump(), my_team.get("transfers"), active_chips, e.payload,
+        )
         raise HTTPException(status_code=422, detail={"message": str(e), "fpl_response": e.payload})
 
     transfer_id = await db.insert_transfer(
@@ -487,7 +513,7 @@ async def execute_transfer(req: TransferExecuteRequest, ctx: tuple = Depends(cur
         player_in_id=req.element_in,
         player_in_name=req.player_in_name,
         selling_price=selling_price,
-        purchase_price=req.element_in_cost,
+        purchase_price=player_in.now_cost,
     )
 
     return {"status": "ok", "transfer_id": transfer_id, "fpl_response": result}

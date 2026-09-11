@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Optional
+
 from models import ScoredPlayer, TransferRecommendation
 
 W_FORM = 2.0
@@ -9,6 +11,8 @@ W_PRICE_CHANGE = 1.0
 W_MINUTES_RISK = 1.0
 
 POSITION_NAMES = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
+
+MAX_PER_CLUB = 3
 
 
 def _next_fixtures_for_player(player_id: int, teams_by_id: dict, fixtures: list[dict], team_id: int, n: int = 5) -> list[dict]:
@@ -170,22 +174,29 @@ def recommend_transfers(
     squad_player_ids: list[int],
     bank: int,
     scored_players: list[ScoredPlayer],
-    free_transfers: int = 1,
+    free_transfers: Optional[int] = 1,
 ) -> list[TransferRecommendation]:
     by_id = {p.id: p for p in scored_players}
     squad = [by_id[pid] for pid in squad_player_ids if pid in by_id]
     if not squad:
         return []
 
+    club_counts: dict[int, int] = {}
+    for p in squad:
+        club_counts[p.team] = club_counts.get(p.team, 0) + 1
+
     recommendations: list[TransferRecommendation] = []
 
     for out_player in squad:
         budget = out_player.now_cost + bank
+        # FPL rejects any squad with more than 3 players from one club, so a
+        # candidate is only legal if his club has room once `out_player` leaves.
         candidates = [
             p for p in scored_players
             if p.element_type == out_player.element_type
             and p.id not in squad_player_ids
             and p.now_cost <= budget
+            and club_counts.get(p.team, 0) - (1 if p.team == out_player.team else 0) < MAX_PER_CLUB
         ]
         if not candidates:
             continue
@@ -198,7 +209,7 @@ def recommend_transfers(
                 player_out=out_player,
                 player_in=best_candidate,
                 score_delta=delta,
-                is_hit=free_transfers <= 0,
+                is_hit=free_transfers is not None and free_transfers <= 0,
                 free_transfers=free_transfers,
                 reasons=build_reasons(out_player.breakdown, best_candidate.breakdown),
             )

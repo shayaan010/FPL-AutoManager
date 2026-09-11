@@ -1,39 +1,10 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
+import { readableError } from "../lib/errors";
 import { FixtureSquares } from "./FixtureGrid";
 
 const POSITION_NAMES = { 1: "GKP", 2: "DEF", 3: "MID", 4: "FWD" };
-
-function readableError(message) {
-  let parsed;
-  try {
-    parsed = JSON.parse(message);
-  } catch {
-    return message;
-  }
-
-  const detail = parsed?.detail ?? parsed;
-  const headline = detail?.message || "Transfer rejected";
-  const notes = [];
-
-  const walk = (node, path) => {
-    if (node == null) return;
-    if (Array.isArray(node)) {
-      node.forEach((item) => walk(item, path));
-    } else if (typeof node === "object") {
-      if (node.message) {
-        notes.push(path ? `${path}: ${node.message}` : node.message);
-        return;
-      }
-      Object.entries(node).forEach(([key, value]) => walk(value, key));
-    }
-  };
-  walk(detail?.fpl_response, "");
-
-  const unique = [...new Set(notes)];
-  return unique.length ? `${headline} — ${unique.join("; ")}` : headline;
-}
 
 function PlayerColumn({ player, side }) {
   return (
@@ -82,9 +53,12 @@ export default function TransferCard({ recommendation, gameweek, index = 0, tota
 
   if (!recommendation) return null;
 
+  // Only ever send what the user actually ticked. Sending true whenever
+  // `is_hit` is false would skip the server's own no-free-transfers check on
+  // stale recommendations, and take a -4 without asking.
   const handleApprove = () => {
     setError(null);
-    mutation.mutate(recommendation.is_hit && !confirmedHit ? false : confirmedHit || !recommendation.is_hit);
+    mutation.mutate(Boolean(confirmedHit));
   };
 
   return (
