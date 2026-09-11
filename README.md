@@ -55,6 +55,18 @@ It is not a chatbot or a read-only recommender. Approving a transfer sends a rea
 | Realtime | WebSocket |
 | Deployment | Railway (backend) + Vercel (frontend) |
 
+### Project Demo
+
+
+
+
+
+https://github.com/user-attachments/assets/555734ad-1dec-405b-886a-bbcef02d8f1d
+
+
+
+
+
 ---
 
 ## Getting Started
